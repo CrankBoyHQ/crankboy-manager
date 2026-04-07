@@ -16,11 +16,13 @@ A cross-platform desktop application for managing Game Boy ROMs on CrankBoy via 
 ## Installation
 
 ### Requirements
+
 - Python 3.8 or higher
 - PyQt6
 - pyserial
 
 ### Install Dependencies
+
 ```bash
 pip install -r requirements.txt
 ```
@@ -28,6 +30,7 @@ pip install -r requirements.txt
 ## Usage
 
 ### Run the Application
+
 ```bash
 python main.py
 ```
@@ -63,6 +66,7 @@ When you transfer a ROM, the app will automatically:
 4. Transfer both the ROM and cover art to your device
 
 **Notes:**
+
 - Cover art is downloaded automatically - no configuration needed
 - Covers are saved with the same basename as the ROM file (e.g., `MyGame.gb` → `MyGame.pdi`)
 - If a cover is not found in the database or download fails, the ROM will still be transferred
@@ -73,11 +77,13 @@ When you transfer a ROM, the app will automatically:
 ### Quick Build (Recommended)
 
 #### Windows
+
 ```batch
 build.bat
 ```
 
 #### macOS / Linux
+
 ```bash
 chmod +x build.sh
 ./build.sh
@@ -86,6 +92,7 @@ chmod +x build.sh
 ### Advanced Build Options
 
 #### Python Build Script
+
 ```bash
 # Standard build
 python build.py
@@ -97,57 +104,26 @@ python build.py --clean
 python build.py --install
 ```
 
-#### Manual PyInstaller
-
-**Windows:**
-```bash
-pyinstaller --onefile --windowed --name "CrankBoyTransfer" --add-data "src;src" main.py
-```
-
-**macOS:**
-```bash
-pyinstaller --onefile --windowed --name "CrankBoy Transfer" --add-data "src:src" main.py
-```
-
-**Linux:**
-```bash
-pyinstaller --onefile --windowed --name "crankboy-transfer" --add-data "src:src" main.py
-```
-
 ### Build Outputs
 
 After building, you'll find:
 
-- **Windows:** `dist/CrankBoyTransfer.exe` + `dist/CrankBoyTransfer-1.0.0-windows.zip`
-- **macOS:** `dist/CrankBoy Transfer.app` + `dist/CrankBoyTransfer-1.0.0-macos.zip`
-- **Linux:** `dist/crankboy-transfer` + `dist/CrankBoyTransfer-1.0.0-linux.tar.gz`
+- **Windows:** `dist/CrankBoyManager.exe` + `dist/CrankBoyManger-1.0.0-windows.zip`
+- **macOS:** `dist/CrankBoy Manager.app` + `dist/CrankBoyManager-1.0.0-macos.zip`
+- **Linux:** `dist/crankboy-manager` + `dist/CrankBoyManager-1.0.0-linux.tar.gz`
 
 ### Distribution
 
 The ZIP/tar.gz archives are ready for distribution. Users can:
+
 1. Download the appropriate archive for their platform
 2. Extract it
 3. Run the executable (no Python installation required)
 
-## Troubleshooting
-
-### "No serial port found"
-- Make sure CrankBoy is connected via USB
-- On Windows: Check Device Manager for COM ports
-- On macOS/Linux: Check for `/dev/tty.*` or `/dev/ttyUSB*` devices
-
-### "Transfer failed"
-- Check that the correct port is selected
-- Try restarting CrankBoy
-- Enable "Verbose" mode for detailed error messages
-
-### "File too large"
-- Maximum file size is 8MB
-- GBZ compression helps reduce size
-
 ## Protocol
 
 This GUI uses the `ft` (File Transfer) protocol:
+
 - Fixed 177-byte chunks
 - CRC16 verification per chunk
 - Automatic GBZ compression/decompression

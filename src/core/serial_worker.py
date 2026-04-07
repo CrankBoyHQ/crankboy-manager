@@ -254,15 +254,18 @@ class SerialWorker(QThread):
                                 if nack_seq in in_flight:
                                     in_flight[nack_seq]['retries'] += 1
                                 self._log(f"CRC error for chunk {nack_seq:04X}")
+                            elif nack_code in ("write", "size"):
+                                # Fatal error - abort current file
+                                self.file_completed.emit(filename, False, f"Device error: {nack_code}")
+                                return False
                         except (ValueError, IndexError):
                             pass
                     return True
                 
                 elif cmd == "x":
-                    # Device error - only fail on serious errors
-                    self.log_message.emit(f"Device error: {params}")
-                    # Don't fail immediately, let retry logic handle it
-                    return True
+                    # Device error - abort current file
+                    self.file_completed.emit(filename, False, f"Device error: {params}")
+                    return False
                 
                 return True  # Unknown command but not fatal
             
@@ -508,13 +511,18 @@ class SerialWorker(QThread):
                             elif nack_code == "crc":
                                 if nack_seq in in_flight:
                                     in_flight[nack_seq]['retries'] += 1
+                            elif nack_code in ("write", "size"):
+                                # Fatal error - abort current cover
+                                self.cover_completed.emit(cover_filename, False, f"Device error: {nack_code}")
+                                return False
                         except (ValueError, IndexError):
                             pass
                     return True
 
                 elif cmd == "x":
-                    self._log(f"Cover device error: {params}")
-                    return True
+                    # Device error - abort current cover
+                    self.cover_completed.emit(cover_filename, False, f"Device error: {params}")
+                    return False
 
                 return True
 

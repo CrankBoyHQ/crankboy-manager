@@ -153,7 +153,7 @@ jobs:
             - name: Prepare Artifact
               run: |
                   mkdir -p artifact_root
-                  cp -R dist/CrankBoyManager.AppDir artifact_root/
+                  cp dist/*.AppImage artifact_root/
 
             - name: Upload Artifact
               uses: actions/upload-artifact@v6

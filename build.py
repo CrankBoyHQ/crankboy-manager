@@ -144,8 +144,8 @@ def build_macos():
 
 
 def build_linux():
-    """Build Linux executable."""
-    print("\n=== Building Linux executable ===")
+    """Build Linux AppImage."""
+    print("\n=== Building Linux AppImage ===")
 
     # Generate version module with hardcoded version
     generate_version_module()
@@ -169,11 +169,7 @@ def build_linux():
 
     subprocess.run(cmd, check=True)
 
-    # Create tar.gz archive
-    archive_name = f"{APP_NAME}-{VERSION}-linux"
-    print(f"\nCreating {archive_name}.tar.gz...")
-
-    # Create AppDir structure for AppImage (optional)
+    # Create AppDir structure for AppImage
     appdir = f"dist/{APP_NAME}.AppDir"
     os.makedirs(appdir, exist_ok=True)
     os.makedirs(f"{appdir}/usr/bin", exist_ok=True)
@@ -196,22 +192,51 @@ Name={APP_DISPLAY_NAME}
 Exec={APP_NAME.lower()}
 Icon={APP_NAME.lower()}
 Type=Application
-Categories=Utility;Game;
+Categories=Utility;
 Comment=Transfer Game Boy ROMs to CrankBoy
 """
     with open(f"{appdir}/{APP_NAME.lower()}.desktop", "w") as f:
         f.write(desktop)
 
-    # Create archive
-    shutil.make_archive(
-        f"dist/{archive_name}",
-        'gztar',
-        'dist',
-        f"{APP_NAME}.AppDir"
-    )
+    # Create a simple placeholder icon (1x1 transparent PNG)
+    # AppImage requires an icon file to be present
+    icon_path = f"{appdir}/{APP_NAME.lower()}.png"
+    # Minimal PNG: 1x1 transparent pixel
+    minimal_png = bytes([
+        0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A,  # PNG signature
+        0x00, 0x00, 0x00, 0x0D, 0x49, 0x48, 0x44, 0x52,  # IHDR chunk
+        0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01,  # 1x1 dimensions
+        0x08, 0x06, 0x00, 0x00, 0x00, 0x1F, 0x15, 0xC4, 0x89,  # 8-bit RGBA
+        0x00, 0x00, 0x00, 0x0D, 0x49, 0x44, 0x41, 0x54,  # IDAT chunk
+        0x08, 0xD7, 0x63, 0xFC, 0xCF, 0xC0, 0x00, 0x00,
+        0x00, 0x03, 0x00, 0x01, 0x00, 0x05, 0xFE, 0xD7,
+        0x00, 0x00, 0x00, 0x00, 0x49, 0x45, 0x4E, 0x44,  # IEND chunk
+        0xAE, 0x42, 0x60, 0x82
+    ])
+    with open(icon_path, "wb") as f:
+        f.write(minimal_png)
+
+    # Download and run appimagetool to create the AppImage
+    appimage_name = f"{APP_NAME}-{VERSION}-x86_64.AppImage"
+    appimage_path = f"dist/{appimage_name}"
+    
+    print(f"\nDownloading appimagetool...")
+    appimagetool_url = "https://github.com/AppImage/appimagetool/releases/download/continuous/appimagetool-x86_64.AppImage"
+    appimagetool_path = "/tmp/appimagetool-x86_64.AppImage"
+    
+    # Download appimagetool if not already present
+    if not os.path.exists(appimagetool_path):
+        subprocess.run(["wget", "-q", "-O", appimagetool_path, appimagetool_url], check=True)
+        os.chmod(appimagetool_path, 0o755)
+    
+    print(f"Creating {appimage_name}...")
+    # Run appimagetool with --appimage-extract-and-run for CI environments without FUSE
+    env = os.environ.copy()
+    env["ARCH"] = "x86_64"  # Required by appimagetool
+    subprocess.run([appimagetool_path, "--appimage-extract-and-run", appdir, appimage_path], env=env, check=True)
 
     print(f"[OK] Build complete: dist/{APP_NAME.lower()}")
-    print(f"[OK] Archive created: dist/{archive_name}.tar.gz")
+    print(f"[OK] AppImage created: {appimage_path}")
 
 
 def install_requirements():

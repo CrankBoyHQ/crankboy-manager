@@ -41,8 +41,13 @@ def get_ssl_context():
     return ssl.create_default_context()
 
 
-def download_cover(crc32: int, progress_callback: Callable[[int, int], None] | None = None) -> bytes | None:
+def download_cover(crc32: int, progress_callback: Callable[[int, int], None] | None = None, is_running_func: Callable[[], bool] | None = None) -> bytes | None:
     """Download cover art for a ROM by CRC32.
+
+    Args:
+        crc32: The CRC32 of the ROM
+        progress_callback: Optional callback(current_bytes, total_bytes)
+        is_running_func: Optional function that returns False if download should abort
 
     Returns:
         The cover art data as bytes, or None if download fails.
@@ -54,18 +59,25 @@ def download_cover(crc32: int, progress_callback: Callable[[int, int], None] | N
 
     # Try downloading with retries
     for attempt in range(1, MAX_RETRIES + 1):
+        if is_running_func and not is_running_func():
+            break
+
         try:
-            data = _download_url(cover_url, progress_callback)
+            data = _download_url(cover_url, progress_callback, is_running_func)
             if data:
                 return data
         except Exception:
             if attempt < MAX_RETRIES:
-                time.sleep(RETRY_DELAY)
+                # Sleep in small increments to be responsive to cancellation
+                for _ in range(int(RETRY_DELAY * 10)):
+                    if is_running_func and not is_running_func():
+                        return None
+                    time.sleep(0.1)
 
     return None
 
 
-def _download_url(url: str, progress_callback: Callable[[int, int], None] | None = None) -> bytes:
+def _download_url(url: str, progress_callback: Callable[[int, int], None] | None = None, is_running_func: Callable[[], bool] | None = None) -> bytes:
     """Download data from a URL."""
     headers = {
         'User-Agent': USER_AGENT,
@@ -77,9 +89,24 @@ def _download_url(url: str, progress_callback: Callable[[int, int], None] | None
 
     with urllib.request.urlopen(req, timeout=30, context=context) as response:
         total_size = int(response.info().get('Content-Length', 0))
-        data = response.read()
-
-        if progress_callback and total_size > 0:
-            progress_callback(len(data), total_size)
-
-        return data
+        
+        # Read in chunks to allow cancellation
+        buffer = []
+        bytes_read = 0
+        chunk_size = 8192
+        
+        while True:
+            if is_running_func and not is_running_func():
+                return b""
+                
+            chunk = response.read(chunk_size)
+            if not chunk:
+                break
+                
+            buffer.append(chunk)
+            bytes_read += len(chunk)
+            
+            if progress_callback and total_size > 0:
+                progress_callback(bytes_read, total_size)
+                
+        return b"".join(buffer)

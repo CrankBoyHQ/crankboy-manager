@@ -91,8 +91,12 @@ class CoverDownloadWorker(QThread):
                     break
 
                 try:
-                    cover_data = download_cover(crc, progress_callback=
-                        lambda curr, total, rf=rom_filename: self.cover_progress.emit(rf, curr, total))
+                    # Pass cancellation lambda to allow downloader to abort mid-stream
+                    cover_data = download_cover(
+                        crc, 
+                        progress_callback=lambda curr, total, rf=rom_filename: self.cover_progress.emit(rf, curr, total),
+                        is_running_func=lambda: self._is_running
+                    )
 
                     if cover_data:
                         # Store cover data in file_info
@@ -163,8 +167,9 @@ class CoverDownloadWorker(QThread):
             # Small sleep to prevent busy-waiting
             time.sleep(0.1)
 
-        # Wait for any remaining downloads
+        # Wait for any remaining downloads with a shorter timeout
+        # They should exit quickly anyway because we set _is_running=False
         for thread in active_downloads.values():
-            thread.join(timeout=5.0)
+            thread.join(timeout=1.0)
 
         self.all_completed.emit()

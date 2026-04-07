@@ -112,7 +112,7 @@ def build_macos():
 
     cmd = [
         "pyinstaller",
-        "--onefile",
+        "--onedir",  # Use onedir mode for macOS .app bundles
         "--windowed",
         "--name", APP_DISPLAY_NAME,
         "--add-data", "src:src",

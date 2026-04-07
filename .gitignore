@@ -102,3 +102,4 @@ src/_version_built.py
 
 # pyenv
 # .python-version
+*.spec

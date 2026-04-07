@@ -79,6 +79,7 @@ def build_windows():
         "--add-data", "db;db",
         "--hidden-import", "serial",
         "--hidden-import", "serial.tools.list_ports",
+        "--hidden-import", "certifi",
         "--clean",
     ]
 
@@ -119,6 +120,7 @@ def build_macos():
         "--add-data", "db:db",
         "--hidden-import", "serial",
         "--hidden-import", "serial.tools.list_ports",
+        "--hidden-import", "certifi",
         "--clean",
     ]
 
@@ -159,6 +161,7 @@ def build_linux():
         "--add-data", "db:db",
         "--hidden-import", "serial",
         "--hidden-import", "serial.tools.list_ports",
+        "--hidden-import", "certifi",
         "--clean",
     ]
 

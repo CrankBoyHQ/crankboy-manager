@@ -97,8 +97,7 @@ class CoverDownloadWorker(QThread):
                     if cover_data:
                         # Store cover data in file_info
                         file_info['cover_data'] = cover_data
-                        # Construct cover filename from ROM basename (not URL-encoded database name)
-                        # This ensures the cover filename matches the ROM filename on device
+                        # Construct cover filename from ROM basename
                         rom_basename = os.path.splitext(rom_filename)[0]
                         file_info['cover_filename'] = f"{rom_basename}.pdi"
                         file_info['cover_url'] = cover_info['url']
@@ -106,14 +105,14 @@ class CoverDownloadWorker(QThread):
                         last_error = f"Downloaded {len(cover_data)} bytes"
                         break
                     else:
-                        last_error = "Download returned no data"
+                        last_error = "Download returned no data or failed"
                         if attempt < 3:
-                            time.sleep(1.0)  # Wait before retry
+                            time.sleep(1.0)
 
                 except Exception as e:
                     last_error = str(e)
                     if attempt < 3:
-                        time.sleep(1.0)  # Wait before retry
+                        time.sleep(1.0)
 
             with self._lock:
                 completed_downloads[rom_filename] = (success, last_error)

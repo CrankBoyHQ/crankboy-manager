@@ -33,6 +33,9 @@ class MainWindow(QMainWindow):
         self.setWindowTitle("CrankBoy Manager")
         self.setMinimumSize(800, 700)
 
+        # Set window icon
+        self._set_window_icon()
+
         # Restore window geometry
         geometry = settings.get_window_geometry()
         if geometry:
@@ -152,6 +155,32 @@ class MainWindow(QMainWindow):
 
         self.file_list.files_added.connect(self._on_files_added)
         self.file_list.itemSelectionChanged.connect(self._on_selection_changed)
+
+    def _set_window_icon(self):
+        """Set the window icon from the bundled icon file."""
+        import sys
+        from pathlib import Path
+        from PyQt6.QtGui import QIcon
+
+        # All icons are in src/assets/
+        icon_dir = Path(__file__).parent.parent / "assets"
+        
+        # Determine icon file based on platform
+        if sys.platform == "darwin":
+            icon_file = "AppIcon.icns"
+        elif sys.platform == "win32":
+            icon_file = "AppIcon.ico"
+        else:
+            icon_file = "AppIcon.png"
+        
+        icon_path = icon_dir / icon_file
+
+        # Also check for icon in PyInstaller bundle location
+        if hasattr(sys, '_MEIPASS'):
+            icon_path = Path(sys._MEIPASS) / "src" / "assets" / icon_file
+
+        if icon_path.exists():
+            self.setWindowIcon(QIcon(str(icon_path)))
 
     def _start_port_scan(self):
         """Start port scan in background thread."""

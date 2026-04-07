@@ -22,7 +22,11 @@ MAIN_SCRIPT = "main.py"
 import sys
 sys.path.insert(0, str(Path(__file__).parent))
 from src.version import VERSION
-ICON_FILE = None  # Add path to .ico (Windows) or .icns (macOS) file
+
+# Platform-specific icon files
+ICON_FILE_WINDOWS = "src/assets/AppIcon.ico"
+ICON_FILE_MACOS = "src/assets/AppIcon.icns"
+ICON_FILE_LINUX = "src/assets/AppIcon.png"
 
 
 def generate_version_module():
@@ -83,8 +87,8 @@ def build_windows():
         "--clean",
     ]
 
-    if ICON_FILE and os.path.exists(ICON_FILE):
-        cmd.extend(["--icon", ICON_FILE])
+    if ICON_FILE_WINDOWS and os.path.exists(ICON_FILE_WINDOWS):
+        cmd.extend(["--icon", ICON_FILE_WINDOWS])
 
     cmd.append(MAIN_SCRIPT)
 
@@ -124,8 +128,8 @@ def build_macos():
         "--clean",
     ]
 
-    if ICON_FILE and os.path.exists(ICON_FILE):
-        cmd.extend(["--icon", ICON_FILE])
+    if ICON_FILE_MACOS and os.path.exists(ICON_FILE_MACOS):
+        cmd.extend(["--icon", ICON_FILE_MACOS])
 
     cmd.append(MAIN_SCRIPT)
 
@@ -165,8 +169,8 @@ def build_linux():
         "--clean",
     ]
 
-    if ICON_FILE and os.path.exists(ICON_FILE):
-        cmd.extend(["--icon", ICON_FILE])
+    if ICON_FILE_LINUX and os.path.exists(ICON_FILE_LINUX):
+        cmd.extend(["--icon", ICON_FILE_LINUX])
 
     cmd.append(MAIN_SCRIPT)
 
@@ -201,37 +205,24 @@ Comment=Transfer Game Boy ROMs to CrankBoy
     with open(f"{appdir}/{APP_NAME.lower()}.desktop", "w") as f:
         f.write(desktop)
 
-    # Create a simple placeholder icon (1x1 transparent PNG)
-    # AppImage requires an icon file to be present
+    # Copy the icon file for Linux AppImage
     icon_path = f"{appdir}/{APP_NAME.lower()}.png"
-    # Minimal PNG: 1x1 transparent pixel
-    minimal_png = bytes([
-        0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A,  # PNG signature
-        0x00, 0x00, 0x00, 0x0D, 0x49, 0x48, 0x44, 0x52,  # IHDR chunk
-        0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01,  # 1x1 dimensions
-        0x08, 0x06, 0x00, 0x00, 0x00, 0x1F, 0x15, 0xC4, 0x89,  # 8-bit RGBA
-        0x00, 0x00, 0x00, 0x0D, 0x49, 0x44, 0x41, 0x54,  # IDAT chunk
-        0x08, 0xD7, 0x63, 0xFC, 0xCF, 0xC0, 0x00, 0x00,
-        0x00, 0x03, 0x00, 0x01, 0x00, 0x05, 0xFE, 0xD7,
-        0x00, 0x00, 0x00, 0x00, 0x49, 0x45, 0x4E, 0x44,  # IEND chunk
-        0xAE, 0x42, 0x60, 0x82
-    ])
-    with open(icon_path, "wb") as f:
-        f.write(minimal_png)
+    if ICON_FILE_LINUX and os.path.exists(ICON_FILE_LINUX):
+        shutil.copy(ICON_FILE_LINUX, icon_path)
 
     # Download and run appimagetool to create the AppImage
     appimage_name = f"{APP_NAME}-{VERSION}-x86_64.AppImage"
     appimage_path = f"dist/{appimage_name}"
-    
+
     print(f"\nDownloading appimagetool...")
     appimagetool_url = "https://github.com/AppImage/appimagetool/releases/download/continuous/appimagetool-x86_64.AppImage"
     appimagetool_path = "/tmp/appimagetool-x86_64.AppImage"
-    
+
     # Download appimagetool if not already present
     if not os.path.exists(appimagetool_path):
         subprocess.run(["wget", "-q", "-O", appimagetool_path, appimagetool_url], check=True)
         os.chmod(appimagetool_path, 0o755)
-    
+
     print(f"Creating {appimage_name}...")
     # Run appimagetool with --appimage-extract-and-run for CI environments without FUSE
     env = os.environ.copy()

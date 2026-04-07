@@ -13,13 +13,14 @@ PLAYDATE_VENDOR_ID = 0x1331
 PLAYDATE_PRODUCT_ID_SERIAL = 0x5740
 
 
-def test_port(port_name, timeout=1.5):
+def test_port(port_name, timeout=1.5, should_stop_callback=None):
     """Test if a serial port is a responsive CrankBoy device.
-    
+
     Args:
         port_name: Serial port device name (e.g., 'COM3' or '/dev/ttyUSB0')
         timeout: How long to wait for response in seconds
-        
+        should_stop_callback: Optional callback that returns True if scan should stop
+
     Returns:
         tuple: (is_crankboy, version_info)
             - is_crankboy: True if CrankBoy responded to ping
@@ -29,13 +30,17 @@ def test_port(port_name, timeout=1.5):
         with serial.Serial(port_name, 115200, timeout=timeout) as ser:
             ser.reset_input_buffer()
             ser.reset_output_buffer()
-            
+
             # Send ping command (protocol: msg cb:ping)
             send_command(ser, "cb:ping")
 
             # Wait for response
             start_time = time.time()
             while time.time() - start_time < timeout:
+                # Check if we should stop
+                if should_stop_callback and should_stop_callback():
+                    return False, None
+
                 response = read_response(ser, timeout=0.5)
                 if response and response.startswith("cb:pong"):
                     # Parse version from response: cb:pong:CrankBoy:v1.0.0
@@ -74,9 +79,12 @@ def is_playdate_device(port):
     return False
 
 
-def scan_for_crankboy():
+def scan_for_crankboy(should_stop_callback=None):
     """Scan for CrankBoy and return detailed status.
-    
+
+    Args:
+        should_stop_callback: Optional callback that returns True if scan should stop
+
     Returns:
         dict with keys:
             - 'status': 'connected_running', 'connected_not_running', or 'not_connected'
@@ -84,19 +92,27 @@ def scan_for_crankboy():
             - 'message': Human-readable status message
     """
     global _last_crankboy_port
-    
+
     # Get all serial ports
     all_ports = list(serial.tools.list_ports.comports())
-    
+
     # Filter out Bluetooth devices
     usb_ports = [p for p in all_ports if 'bluetooth' not in p.description.lower()]
-    
+
     # Check if any Playdate devices are connected (by VID/PID)
     playdate_ports = [p for p in usb_ports if is_playdate_device(p)]
-    
+
     # Test cached port first
     if _last_crankboy_port:
-        is_crankboy, version = test_port(_last_crankboy_port, timeout=1.0)
+        # Check if we should stop before testing
+        if should_stop_callback and should_stop_callback():
+            return {
+                'status': 'not_connected',
+                'port': None,
+                'message': "Scan interrupted"
+            }
+
+        is_crankboy, version = test_port(_last_crankboy_port, timeout=1.0, should_stop_callback=should_stop_callback)
         if is_crankboy:
             for p in usb_ports:
                 if p.device == _last_crankboy_port:
@@ -110,10 +126,18 @@ def scan_for_crankboy():
                         'message': f"CrankBoy detected on {p.device}"
                     }
         _last_crankboy_port = None
-    
+
     # Test all ports for CrankBoy response
     for port in usb_ports:
-        is_crankboy, version = test_port(port.device)
+        # Check if we should stop before testing each port
+        if should_stop_callback and should_stop_callback():
+            return {
+                'status': 'not_connected',
+                'port': None,
+                'message': "Scan interrupted"
+            }
+
+        is_crankboy, version = test_port(port.device, should_stop_callback=should_stop_callback)
         if is_crankboy:
             _last_crankboy_port = port.device
             return {
@@ -125,7 +149,7 @@ def scan_for_crankboy():
                 },
                 'message': f"CrankBoy detected on {port.device}"
             }
-    
+
     # No CrankBoy response - check if Playdate hardware is connected
     if playdate_ports:
         return {
@@ -133,7 +157,7 @@ def scan_for_crankboy():
             'port': None,
             'message': "Playdate connected but CrankBoy not running - please start CrankBoy"
         }
-    
+
     # No USB devices at all
     if not usb_ports:
         return {
@@ -141,7 +165,7 @@ def scan_for_crankboy():
             'port': None,
             'message': "Playdate not connected - please connect your device"
         }
-    
+
     # USB devices present but none are Playdate
     return {
         'status': 'not_connected',

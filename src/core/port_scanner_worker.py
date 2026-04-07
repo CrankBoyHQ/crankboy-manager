@@ -17,7 +17,8 @@ class PortScannerWorker(QThread):
     def run(self):
         """Run the port scan in background."""
         self._is_running = True
-        result = scan_for_crankboy()
+        # Pass callback so scan_for_crankboy() can check if it should stop
+        result = scan_for_crankboy(should_stop_callback=lambda: not self._is_running)
         if self._is_running:
             self.scan_complete.emit(result)
     

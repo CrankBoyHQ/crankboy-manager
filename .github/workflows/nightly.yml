@@ -106,12 +106,106 @@ jobs:
                   DATE_STAMP=$(date +'%Y%m%d')
                   ARTIFACT_NAME="CrankBoy-Manager-${APP_VERSION}-${DATE_STAMP}-macos"
                   echo "artifact_name=${ARTIFACT_NAME}" >> $GITHUB_OUTPUT
+                  echo "app_version=${APP_VERSION}" >> $GITHUB_OUTPUT
+
+            - name: Import Code Signing Certificates
+              uses: apple-actions/import-codesign-certs@v3
+              with:
+                  p12-file-base64: ${{ secrets.MACOS_CERTIFICATE }}
+                  p12-password: ${{ secrets.MACOS_CERTIFICATE_PASSWORD }}
+                  keychain-password: ${{ secrets.MACOS_KEYCHAIN_PASSWORD }}
+
+            - name: Sign App Bundle
+              run: |
+                  # Use certificate SHA-1 from secrets
+                  CERT_SHA1="${{ secrets.MACOS_CERTIFICATE_SHA1 }}"
+                  
+                  APP_PATH="dist/CrankBoy Manager.app"
+                  MAIN_BINARY="$APP_PATH/Contents/MacOS/CrankBoy Manager"
+                  
+                  # 1. Remove any existing signatures
+                  echo "Removing existing signatures..."
+                  find "$APP_PATH" -type f -exec codesign --remove-signature {} \; 2>/dev/null || true
+                  codesign --remove-signature "$APP_PATH" 2>/dev/null || true
+                  
+                  # 2. Sign all Mach-O binaries (deepest first, excluding main executable)
+                  echo "Signing nested binaries..."
+                  # Sort by path depth (number of slashes) - deepest first
+                  find "$APP_PATH" -type f -exec sh -c 'file "$1" | grep -q "Mach-O"' _ {} \; -print | \
+                    awk -F/ '{print NF, $0}' | sort -rn | cut -d' ' -f2- | \
+                    while IFS= read -r file; do
+                      if [ "$file" != "$MAIN_BINARY" ]; then
+                        echo "Signing: $file"
+                        codesign --force --timestamp --options runtime --sign "$CERT_SHA1" "$file"
+                      fi
+                    done
+                  
+                  # 3. Sign the main executable with entitlements
+                  if [ -f "$MAIN_BINARY" ]; then
+                    echo "Signing main executable with entitlements: $MAIN_BINARY"
+                    codesign --force --timestamp --options runtime --entitlements entitlements.plist --sign "$CERT_SHA1" "$MAIN_BINARY"
+                  else
+                    echo "Error: Main binary not found at $MAIN_BINARY"
+                    exit 1
+                  fi
+                  
+                  # 4. Sign the app bundle itself
+                  echo "Signing main app bundle..."
+                  codesign --force --timestamp --options runtime --entitlements entitlements.plist --sign "$CERT_SHA1" "$APP_PATH"
+                  
+                  # 5. Verify code signature
+                  echo "Verifying code signature..."
+                  codesign --verify --verbose --deep --strict "$APP_PATH"
+
+            - name: Create Signed ZIP
+              run: |
+                  cd dist
+                  # Use ditto to preserve symlinks and metadata
+                  /usr/bin/ditto -c -k --sequesterRsrc --keepParent "CrankBoy Manager.app" "CrankBoyManager-${{ steps.artifact_details.outputs.app_version }}-macos.zip"
+
+            - name: Notarize App
+              id: notarize
+              run: |
+                  echo "Submitting for notarization..."
+                  xcrun notarytool submit "dist/CrankBoyManager-${{ steps.artifact_details.outputs.app_version }}-macos.zip" \
+                    --apple-id "${{ secrets.MACOS_NOTARIZATION_APPLE_ID }}" \
+                    --team-id "${{ secrets.MACOS_NOTARIZATION_TEAM_ID }}" \
+                    --password "${{ secrets.MACOS_NOTARIZATION_PASSWORD }}" \
+                    --wait 2>&1 | tee notary_output.txt
+                  
+                  # Extract submission ID for logging
+                  SUBMISSION_ID=$(grep -o 'id: [a-f0-9-]*' notary_output.txt | head -1 | cut -d' ' -f2)
+                  echo "submission_id=$SUBMISSION_ID" >> $GITHUB_OUTPUT
+                  
+                  # Check if notarization succeeded
+                  if grep -q "status: Invalid" notary_output.txt; then
+                    echo "ERROR: Notarization failed with 'Invalid' status"
+                    echo "Fetching detailed logs..."
+                    if [ -n "$SUBMISSION_ID" ]; then
+                      echo "=== Detailed Notarization Log ==="
+                      xcrun notarytool log "$SUBMISSION_ID" \
+                        --apple-id "${{ secrets.MACOS_NOTARIZATION_APPLE_ID }}" \
+                        --team-id "${{ secrets.MACOS_NOTARIZATION_TEAM_ID }}" \
+                        --password "${{ secrets.MACOS_NOTARIZATION_PASSWORD }}" || true
+                    fi
+                    echo "=== Notarization Output ==="
+                    cat notary_output.txt
+                    exit 1
+                  fi
+
+            - name: Staple Notarization Ticket
+              run: |
+                  xcrun stapler staple "dist/CrankBoy Manager.app"
+                  xcrun stapler validate "dist/CrankBoy Manager.app"
 
             - name: Prepare Artifact
               run: |
                   mkdir -p artifact_root
-                  # macOS app has space in name: "CrankBoy Manager.app"
-                  cp -R "dist/CrankBoy Manager.app" artifact_root/ 2>/dev/null || cp "dist/CrankBoyManager" artifact_root/
+                  # Recreate ZIP after stapling
+                  cd dist
+                  rm -f "CrankBoyManager-${{ steps.artifact_details.outputs.app_version }}-macos.zip"
+                  /usr/bin/ditto -c -k --sequesterRsrc --keepParent "CrankBoy Manager.app" "CrankBoyManager-${{ steps.artifact_details.outputs.app_version }}-macos.zip"
+                  mv "CrankBoyManager-${{ steps.artifact_details.outputs.app_version }}-macos.zip" ../artifact_root/
 
             - name: Upload Artifact
               uses: actions/upload-artifact@v6

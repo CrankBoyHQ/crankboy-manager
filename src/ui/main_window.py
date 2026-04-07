@@ -650,6 +650,23 @@ class MainWindow(QMainWindow):
 
     def closeEvent(self, event):
         """Handle window close."""
+        # Check if any operations are in progress
+        is_transferring = self.worker and self.worker.isRunning()
+        is_downloading = self._cover_download_worker and self._cover_download_worker.isRunning()
+
+        if is_transferring or is_downloading:
+            msg = "A transfer is currently in progress." if is_transferring else "Cover downloads are in progress."
+            reply = QMessageBox.question(
+                self, 'Confirm Exit',
+                f"{msg}\n\nDo you want to stop the operation and exit?",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                QMessageBox.StandardButton.No
+            )
+
+            if reply == QMessageBox.StandardButton.No:
+                event.ignore()
+                return
+
         # Stop auto-refresh timer
         self._scan_timer.stop()
 

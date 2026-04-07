@@ -100,14 +100,15 @@ class SerialWorker(QThread):
                 send_command(ser, "cb:restart")
                 time.sleep(0.5)  # Give time for restart to initiate
             # Otherwise, disable SFT overlay if it was enabled
-            elif self.use_sft and self._is_running:
+            elif self.use_sft:
+                # Always try to turn off SFT if it was enabled, 
+                # even if we were stopped (unless we're restarting)
                 self.log_message.emit("Disabling Serial File Transfer overlay...")
                 send_command(ser, "cb:sft:off")
-                response = read_response(ser, timeout=2.0)
+                # Use a short timeout for this final response
+                response = read_response(ser, timeout=1.0)
                 if response == "cb:sft:ok":
                     self.log_message.emit("SFT overlay disabled ✓")
-                else:
-                    self.log_message.emit(f"Warning: Failed to disable SFT overlay: {response}")
                 time.sleep(0.1)  # Small delay after disabling SFT
 
             ser.close()

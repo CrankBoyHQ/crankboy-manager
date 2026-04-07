@@ -94,6 +94,9 @@ htmlcov/
 # Type checkers
 .mypy_cache/
 
+# Generated version module (created at build time)
+src/_version_built.py
+
 # Jupyter Notebook
 .ipynb_checkpoints
 

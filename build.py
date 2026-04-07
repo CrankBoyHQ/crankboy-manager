@@ -16,9 +16,26 @@ from pathlib import Path
 # Build configuration
 APP_NAME = "CrankBoyManager"
 APP_DISPLAY_NAME = "CrankBoy Manager"
-VERSION = "1.0.0"
 MAIN_SCRIPT = "main.py"
+
+# Import version from centralized module
+import sys
+sys.path.insert(0, str(Path(__file__).parent))
+from src.version import VERSION
 ICON_FILE = None  # Add path to .ico (Windows) or .icns (macOS) file
+
+
+def generate_version_module():
+    """Generate _version_built.py with hardcoded version for PyInstaller builds.
+
+    This allows the built executable to have the version hardcoded at build time,
+    avoiding file I/O operations in production.
+    """
+    version_module_path = Path(__file__).parent / "src" / "_version_built.py"
+    with open(version_module_path, 'w') as f:
+        f.write(f'"""Auto-generated version module. Do not edit."""\n')
+        f.write(f'VERSION = "{VERSION}"\n')
+    print(f"Generated {version_module_path} with version {VERSION}")
 
 
 def get_platform():
@@ -37,7 +54,7 @@ def clean_build():
         if os.path.exists(dir_name):
             shutil.rmtree(dir_name)
             print(f"  Removed {dir_name}/")
-    
+
     # Clean .pyc files
     for pyc_file in Path(".").rglob("*.pyc"):
         pyc_file.unlink()
@@ -49,25 +66,29 @@ def clean_build():
 def build_windows():
     """Build Windows executable."""
     print("\n=== Building Windows executable ===")
-    
+
+    # Generate version module with hardcoded version
+    generate_version_module()
+
     cmd = [
         "pyinstaller",
         "--onefile",
         "--windowed",
         "--name", APP_NAME,
-        "--add-data", "src;src",  # Include src package
+        "--add-data", "src;src",
+        "--add-data", "db;db",
         "--hidden-import", "serial",
         "--hidden-import", "serial.tools.list_ports",
         "--clean",
     ]
-    
+
     if ICON_FILE and os.path.exists(ICON_FILE):
         cmd.extend(["--icon", ICON_FILE])
-    
+
     cmd.append(MAIN_SCRIPT)
-    
+
     subprocess.run(cmd, check=True)
-    
+
     # Create ZIP archive
     zip_name = f"{APP_NAME}-{VERSION}-windows.zip"
     print(f"\nCreating {zip_name}...")
@@ -77,52 +98,38 @@ def build_windows():
         'dist',
         APP_NAME + '.exe'
     )
-    
-    print(f"✓ Build complete: dist/{APP_NAME}.exe")
-    print(f"✓ Archive created: dist/{zip_name}")
+
+    print(f"[OK] Build complete: dist/{APP_NAME}.exe")
+    print(f"[OK] Archive created: dist/{zip_name}")
 
 
 def build_macos():
     """Build macOS app bundle."""
     print("\n=== Building macOS app bundle ===")
-    
+
+    # Generate version module with hardcoded version
+    generate_version_module()
+
     cmd = [
         "pyinstaller",
         "--onefile",
         "--windowed",
         "--name", APP_DISPLAY_NAME,
-        "--add-data", "src:src",  # macOS uses colon separator
+        "--add-data", "src:src",
+        "--add-data", "db:db",
         "--hidden-import", "serial",
         "--hidden-import", "serial.tools.list_ports",
         "--clean",
     ]
-    
+
     if ICON_FILE and os.path.exists(ICON_FILE):
         cmd.extend(["--icon", ICON_FILE])
-    
+
     cmd.append(MAIN_SCRIPT)
-    
+
     subprocess.run(cmd, check=True)
-    
-    # Create DMG (requires dmgbuild, optional)
-    try:
-        import dmgbuild
-        print("\nCreating DMG installer...")
-        dmg_name = f"dist/{APP_NAME}-{VERSION}-macos.dmg"
-        # Basic DMG creation
-        subprocess.run([
-            "hdiutil", "create",
-            "-srcfolder", f"dist/{APP_DISPLAY_NAME}.app",
-            "-volname", APP_DISPLAY_NAME,
-            "-fs", "HFS+",
-            "-format", "UDZO",
-            dmg_name
-        ], check=True)
-        print(f"✓ DMG created: {dmg_name}")
-    except Exception as e:
-        print(f"Note: DMG creation skipped ({e})")
-    
-    # Create ZIP as fallback
+
+    # Create ZIP archive
     zip_name = f"{APP_NAME}-{VERSION}-macos.zip"
     print(f"\nCreating {zip_name}...")
     shutil.make_archive(
@@ -131,54 +138,58 @@ def build_macos():
         'dist',
         APP_DISPLAY_NAME + '.app'
     )
-    
-    print(f"✓ Build complete: dist/{APP_DISPLAY_NAME}.app")
-    print(f"✓ Archive created: dist/{zip_name}")
+
+    print(f"[OK] Build complete: dist/{APP_DISPLAY_NAME}.app")
+    print(f"[OK] Archive created: dist/{zip_name}")
 
 
 def build_linux():
     """Build Linux executable."""
     print("\n=== Building Linux executable ===")
-    
+
+    # Generate version module with hardcoded version
+    generate_version_module()
+
     cmd = [
         "pyinstaller",
         "--onefile",
         "--windowed",
         "--name", APP_NAME.lower(),
-        "--add-data", "src:src",  # Linux uses colon separator
+        "--add-data", "src:src",
+        "--add-data", "db:db",
         "--hidden-import", "serial",
         "--hidden-import", "serial.tools.list_ports",
         "--clean",
     ]
-    
+
     if ICON_FILE and os.path.exists(ICON_FILE):
         cmd.extend(["--icon", ICON_FILE])
-    
+
     cmd.append(MAIN_SCRIPT)
-    
+
     subprocess.run(cmd, check=True)
-    
+
     # Create tar.gz archive
     archive_name = f"{APP_NAME}-{VERSION}-linux"
     print(f"\nCreating {archive_name}.tar.gz...")
-    
+
     # Create AppDir structure for AppImage (optional)
     appdir = f"dist/{APP_NAME}.AppDir"
     os.makedirs(appdir, exist_ok=True)
     os.makedirs(f"{appdir}/usr/bin", exist_ok=True)
-    
+
     # Copy executable
     shutil.copy(f"dist/{APP_NAME.lower()}", f"{appdir}/usr/bin/")
-    
+
     # Create AppRun script
-    apprun = f"""#!/bin/bash
-HERE="$(dirname "$(readlink -f "${0}")")"
-exec "${HERE}/usr/bin/{APP_NAME.lower()}" "$@"
-"""
+    # APPDIR is provided by AppImage runtime
+    apprun = """#!/bin/bash
+exec "${{APPDIR}}/usr/bin/{app_name}" "$@"
+""".format(app_name=APP_NAME.lower())
     with open(f"{appdir}/AppRun", "w") as f:
         f.write(apprun)
     os.chmod(f"{appdir}/AppRun", 0o755)
-    
+
     # Create desktop entry
     desktop = f"""[Desktop Entry]
 Name={APP_DISPLAY_NAME}
@@ -190,7 +201,7 @@ Comment=Transfer Game Boy ROMs to CrankBoy
 """
     with open(f"{appdir}/{APP_NAME.lower()}.desktop", "w") as f:
         f.write(desktop)
-    
+
     # Create archive
     shutil.make_archive(
         f"dist/{archive_name}",
@@ -198,9 +209,9 @@ Comment=Transfer Game Boy ROMs to CrankBoy
         'dist',
         f"{APP_NAME}.AppDir"
     )
-    
-    print(f"✓ Build complete: dist/{APP_NAME.lower()}")
-    print(f"✓ Archive created: dist/{archive_name}.tar.gz")
+
+    print(f"[OK] Build complete: dist/{APP_NAME.lower()}")
+    print(f"[OK] Archive created: dist/{archive_name}.tar.gz")
 
 
 def install_requirements():
@@ -213,11 +224,11 @@ def install_requirements():
 def main():
     """Main build function."""
     current_platform = get_platform()
-    
+
     print(f"CrankBoy Transfer GUI Builder v{VERSION}")
     print(f"Platform: {current_platform}")
     print("=" * 50)
-    
+
     # Parse arguments
     import argparse
     parser = argparse.ArgumentParser(description="Build CrankBoy Transfer GUI")
@@ -225,19 +236,19 @@ def main():
     parser.add_argument("--install", action="store_true", help="Install requirements")
     parser.add_argument("--all", action="store_true", help="Build for all platforms (requires cross-compilation setup)")
     args = parser.parse_args()
-    
+
     if args.clean:
         clean_build()
-        print("\n✓ Clean complete")
+        print("\n[OK] Clean complete")
         return
-    
+
     if args.install:
         install_requirements()
         return
-    
+
     # Clean previous builds
     clean_build()
-    
+
     # Build for current platform
     try:
         if current_platform == "windows":
@@ -250,16 +261,16 @@ def main():
             print(f"Unsupported platform: {current_platform}")
             sys.exit(1)
     except subprocess.CalledProcessError as e:
-        print(f"\n✗ Build failed: {e}")
+        print(f"\n[FAIL] Build failed: {e}")
         sys.exit(1)
     except Exception as e:
-        print(f"\n✗ Build failed: {e}")
+        print(f"\n[FAIL] Build failed: {e}")
         import traceback
         traceback.print_exc()
         sys.exit(1)
-    
+
     print("\n" + "=" * 50)
-    print("✓ Build complete!")
+    print("[OK] Build complete!")
     print(f"Output: dist/")
 
 

@@ -1,14 +1,30 @@
 """Database module for looking up ROM information by CRC32."""
 
 import os
+import sys
 import json
 import gzip
 import zlib
 from pathlib import Path
 
+
+def _get_db_dir() -> Path:
+    """Get the database directory path.
+    
+    Handles both development and PyInstaller bundle modes.
+    """
+    # Check if running as PyInstaller bundle
+    if hasattr(sys, '_MEIPASS'):
+        # PyInstaller: db is at bundle root
+        return Path(sys._MEIPASS) / "db"
+    else:
+        # Development: db is at project root
+        return Path(__file__).parent.parent.parent / "db"
+
+
 # Database configuration
 DB_MASK = 0xFC  # Should match create_rom_list.py
-DB_DIR = Path(__file__).parent.parent.parent / "db"
+DB_DIR = _get_db_dir()
 
 # Cover download configuration
 COVERS_BASE_URL = "https://raw.githubusercontent.com/CrankBoyHQ/crankboy-covers/refs/heads/main/Combined_Boxarts"

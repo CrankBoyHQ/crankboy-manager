@@ -1,0 +1,162 @@
+name: Nightly Build
+
+on:
+    # Triggers the workflow at 03:00 UTC every day.
+    schedule:
+        - cron: "0 3 * * *"
+
+    # Allows you to run this workflow manually from the Actions tab on GitHub.
+    workflow_dispatch:
+
+jobs:
+    check_for_commits:
+        name: Check for Recent Commits
+        runs-on: ubuntu-latest
+        outputs:
+            has_new_commits: ${{ steps.check_git.outputs.has_new_commits }}
+        steps:
+            # Step 1: Checkout repository history
+            - name: Checkout for commit history check
+              uses: actions/checkout@v6
+              with:
+                  fetch-depth: 0
+
+            # Step 2: Check for commits in the last 24 hours
+            - name: Check for commits in the last 24 hours
+              id: check_git
+              run: |
+                  if [ -z "$(git log --since='yesterday' --oneline)" ]; then
+                    echo "No new commits found. Halting workflow."
+                    echo "has_new_commits=false" >> $GITHUB_OUTPUT
+                  else
+                    echo "New commits found. Proceeding with builds."
+                    echo "has_new_commits=true" >> $GITHUB_OUTPUT
+                  fi
+
+    build_windows:
+        name: Build Windows Executable
+        needs: check_for_commits
+        if: needs.check_for_commits.outputs.has_new_commits == 'true'
+        runs-on: windows-latest
+        steps:
+            - name: Checkout Repository
+              uses: actions/checkout@v6
+
+            - name: Set up Python 3.12
+              uses: actions/setup-python@v6
+              with:
+                  python-version: '3.12'
+
+            - name: Install Dependencies
+              run: |
+                  python -m pip install --upgrade pip
+                  pip install pyinstaller pyserial PyQt6
+
+            - name: Build Executable
+              run: |
+                  python build.py
+
+            - name: Get Artifact Name
+              id: artifact_details
+              shell: bash
+              run: |
+                  APP_VERSION=$(grep "^version=" .version 2>/dev/null | cut -d'=' -f2 || echo "1.0.0")
+                  DATE_STAMP=$(date +'%Y%m%d')
+                  ARTIFACT_NAME="CrankBoy-Manager-${APP_VERSION}-${DATE_STAMP}-windows"
+                  echo "artifact_name=${ARTIFACT_NAME}" >> $GITHUB_OUTPUT
+
+            - name: Prepare Artifact
+              run: |
+                  mkdir artifact_root
+                  Copy-Item dist/CrankBoyManager.exe artifact_root/
+
+            - name: Upload Artifact
+              uses: actions/upload-artifact@v6
+              with:
+                  name: ${{ steps.artifact_details.outputs.artifact_name }}
+                  path: artifact_root/
+
+    build_macos:
+        name: Build macOS Executable
+        needs: check_for_commits
+        if: needs.check_for_commits.outputs.has_new_commits == 'true'
+        runs-on: macos-latest
+        steps:
+            - name: Checkout Repository
+              uses: actions/checkout@v6
+
+            - name: Set up Python 3.12
+              uses: actions/setup-python@v6
+              with:
+                  python-version: '3.12'
+
+            - name: Install Dependencies
+              run: |
+                  python3 -m pip install --upgrade pip
+                  pip3 install pyinstaller pyserial PyQt6
+
+            - name: Build Executable
+              run: |
+                  python3 build.py
+
+            - name: Get Artifact Name
+              id: artifact_details
+              run: |
+                  APP_VERSION=$(grep "^version=" .version 2>/dev/null | cut -d'=' -f2 || echo "1.0.0")
+                  DATE_STAMP=$(date +'%Y%m%d')
+                  ARTIFACT_NAME="CrankBoy-Manager-${APP_VERSION}-${DATE_STAMP}-macos"
+                  echo "artifact_name=${ARTIFACT_NAME}" >> $GITHUB_OUTPUT
+
+            - name: Prepare Artifact
+              run: |
+                  mkdir -p artifact_root
+                  # macOS app has space in name: "CrankBoy Manager.app"
+                  cp -R "dist/CrankBoy Manager.app" artifact_root/ 2>/dev/null || cp "dist/CrankBoyManager" artifact_root/
+
+            - name: Upload Artifact
+              uses: actions/upload-artifact@v6
+              with:
+                  name: ${{ steps.artifact_details.outputs.artifact_name }}
+                  path: artifact_root/
+
+    build_linux:
+        name: Build Linux Executable
+        needs: check_for_commits
+        if: needs.check_for_commits.outputs.has_new_commits == 'true'
+        runs-on: ubuntu-latest
+        steps:
+            - name: Checkout Repository
+              uses: actions/checkout@v6
+
+            - name: Set up Python 3.12
+              uses: actions/setup-python@v6
+              with:
+                  python-version: '3.12'
+
+            - name: Install Dependencies
+              run: |
+                  python3 -m pip install --upgrade pip
+                  pip3 install pyinstaller pyserial PyQt6
+
+            - name: Build Executable
+              run: |
+                  python3 build.py
+
+            - name: Get Artifact Name
+              id: artifact_details
+              run: |
+                  APP_VERSION=$(grep "^version=" .version 2>/dev/null | cut -d'=' -f2 || echo "1.0.0")
+                  DATE_STAMP=$(date +'%Y%m%d')
+                  ARTIFACT_NAME="CrankBoy-Manager-${APP_VERSION}-${DATE_STAMP}-linux"
+                  echo "artifact_name=${ARTIFACT_NAME}" >> $GITHUB_OUTPUT
+
+            - name: Prepare Artifact
+              run: |
+                  mkdir -p artifact_root
+                  cp -R dist/CrankBoyManager.AppDir artifact_root/
+
+            - name: Upload Artifact
+              uses: actions/upload-artifact@v6
+              with:
+                  name: ${{ steps.artifact_details.outputs.artifact_name }}
+                  path: artifact_root/

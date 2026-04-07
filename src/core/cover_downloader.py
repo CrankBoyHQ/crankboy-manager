@@ -1,15 +1,25 @@
 """Cover art downloader module."""
 
+import os
+import sys
 import urllib.request
 import urllib.error
 import time
+from pathlib import Path
 from typing import Callable
 
+# Add parent directory to path for imports
+sys.path.insert(0, str(Path(__file__).parent.parent.parent))
+
 from src.core.database import database
+from src.version import VERSION
 
 # Retry configuration
 MAX_RETRIES = 3
 RETRY_DELAY = 1.0  # seconds
+
+# User-Agent with dynamic version
+USER_AGENT = f'CrankBoyManager/{VERSION}'
 
 
 def download_cover(crc32: int, progress_callback: Callable[[int, int], None] | None = None) -> bytes | None:
@@ -58,7 +68,7 @@ def _download_url(url: str, progress_callback: Callable[[int, int], None] | None
         The downloaded data as bytes
     """
     headers = {
-        'User-Agent': 'CrankBoyTransfer/1.0.0'
+        'User-Agent': USER_AGENT
     }
 
     req = urllib.request.Request(url, headers=headers)

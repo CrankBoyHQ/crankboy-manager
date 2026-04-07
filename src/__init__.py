@@ -13,6 +13,7 @@ def main():
     from PyQt6.QtCore import Qt
     from src.ui.main_window import MainWindow
     from src.utils.settings import Settings
+    from src.version import VERSION
 
     # Enable high DPI scaling
     QApplication.setHighDpiScaleFactorRoundingPolicy(
@@ -21,7 +22,7 @@ def main():
 
     app = QApplication(sys.argv)
     app.setApplicationName("CrankBoy Manager")
-    app.setApplicationVersion("1.0.0")
+    app.setApplicationVersion(VERSION)
     app.setOrganizationName("CrankBoy Dev Team")
 
     # Load settings

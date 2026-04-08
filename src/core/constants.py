@@ -8,3 +8,11 @@ class FileStatus(Enum):
     TRANSFERRING = "Transferring..."
     DONE = "Done"
     FAILED = "Failed"
+
+
+class TransferButtonState(Enum):
+    """Button text states for the transfer button."""
+    START = "Start Transfer"
+    STOP = "Stop Transfer"
+    RESUME = "Resume Transfer"
+    RETRY = "Retry Transfer"

@@ -18,6 +18,7 @@ from src.core.port_scanner import scan_for_crankboy
 from src.core.port_scanner_worker import PortScannerWorker
 from src.core.cover_download_worker import CoverDownloadWorker
 from src.core.transfer_engine import send_command, read_response
+from src.core.constants import FileStatus
 
 
 class MainWindow(QMainWindow):
@@ -57,6 +58,9 @@ class MainWindow(QMainWindow):
         # Initial scan
         self._start_port_scan()
 
+        # Update transfer button state
+        self._update_transfer_button_state()
+
     def _setup_ui(self):
         """Setup the user interface."""
         central = QWidget()
@@ -86,11 +90,8 @@ class MainWindow(QMainWindow):
         btn_layout = QHBoxLayout()
 
         self.transfer_btn = QPushButton("Start Transfer")
+        self.transfer_btn.setMinimumWidth(150)  # Accommodate "Stop Transfer" text
         btn_layout.addWidget(self.transfer_btn)
-
-        self.stop_btn = QPushButton("Stop")
-        self.stop_btn.setEnabled(False)
-        btn_layout.addWidget(self.stop_btn)
 
         btn_layout.addStretch()
 
@@ -169,8 +170,7 @@ class MainWindow(QMainWindow):
         """Connect UI signals."""
         self.add_btn.clicked.connect(self._add_files_dialog)
         self.remove_btn.clicked.connect(self._remove_selected_files)
-        self.transfer_btn.clicked.connect(self._start_transfer)
-        self.stop_btn.clicked.connect(self._stop_transfer)
+        self.transfer_btn.clicked.connect(self._on_transfer_button_clicked)
         self.clear_btn.clicked.connect(self._clear_completed)
 
         self.file_list.files_added.connect(self._on_files_added)
@@ -244,6 +244,7 @@ class MainWindow(QMainWindow):
                 self.port_combo.addItem("Playdate disconnected", None)
                 self._log("Playdate disconnected")
             self.port_combo.setEnabled(False)
+            self._update_transfer_button_state()
             return
 
         # Handle new connection
@@ -257,6 +258,7 @@ class MainWindow(QMainWindow):
             self.port_combo.addItem(label, device)
             self._log(f"CrankBoy {version} detected on {device}")
             self.port_combo.setEnabled(True)
+            self._update_transfer_button_state()
             return
 
         # Handle already connected (no change)
@@ -274,6 +276,7 @@ class MainWindow(QMainWindow):
                 self.port_combo.addItem(label, device)
                 self._log(f"CrankBoy {version} detected on {device}")
                 self.port_combo.setEnabled(True)
+                self._update_transfer_button_state()
             return
 
         # Handle still not connected - update status if changed
@@ -285,12 +288,14 @@ class MainWindow(QMainWindow):
                     self.port_combo.addItem("CrankBoy not running", None)
                     self.port_combo.setEnabled(False)
                     self._log(result['message'])
+                    self._update_transfer_button_state()
             else:
                 if current_text != "Playdate not connected":
                     self.port_combo.clear()
                     self.port_combo.addItem("Playdate not connected", None)
                     self.port_combo.setEnabled(False)
                     self._log(result['message'])
+                    self._update_transfer_button_state()
 
     def _add_files_dialog(self):
         """Open file dialog to add files."""
@@ -307,6 +312,7 @@ class MainWindow(QMainWindow):
         """Handle files being added."""
         self._log(f"Added {len(files)} file(s)")
         self._update_progress_label()
+        self._update_transfer_button_state()
 
         # Start background cover downloads for new files
         self._start_cover_downloads_for_files(files)
@@ -384,6 +390,7 @@ class MainWindow(QMainWindow):
                 self.file_list.remove_file(filepath)
 
         self._update_progress_label()
+        self._update_transfer_button_state()
 
     def _start_transfer(self):
         """Start the transfer process."""
@@ -396,9 +403,9 @@ class MainWindow(QMainWindow):
             row = self.file_list.filepaths.index(filepath)
             status_item = self.file_list.item(row, 4)  # Status column
             if status_item:
-                status = status_item.text()
+                status = status_item.data(Qt.ItemDataRole.UserRole)
                 # Only include files that are not done
-                if status != "Done":
+                if status != FileStatus.DONE:
                     # Get existing file_info (which has cover data from background download)
                     file_info = self.file_list.files_info.get(filepath)
                     if file_info:
@@ -410,17 +417,10 @@ class MainWindow(QMainWindow):
                         files.append(file_info)
 
         if not files:
-            QMessageBox.information(self, "All Complete", "All files have already been transferred successfully.")
             return
 
         port = self.port_combo.currentData()
         if not port:
-            # Get current status to show appropriate message
-            result = scan_for_crankboy()
-            if result['status'] == 'connected_not_running':
-                QMessageBox.warning(self, "CrankBoy Not Running", "Playdate is connected but CrankBoy is not running.\n\nPlease start CrankBoy on your device.")
-            else:
-                QMessageBox.warning(self, "Playdate Not Connected", "Please connect your Playdate device via USB.")
             return
 
         # Query current scene to ensure we're in library
@@ -492,14 +492,17 @@ class MainWindow(QMainWindow):
         self._current_file_total = 0
 
         # Count skipped files (those with "Done" status)
-        done_count = sum(1 for row in range(self.file_list.rowCount())
-                        if self.file_list.item(row, 4) and self.file_list.item(row, 4).text() == "Done")
+        done_count = 0
+        for row in range(self.file_list.rowCount()):
+            status_item = self.file_list.item(row, 4)
+            if status_item and status_item.data(Qt.ItemDataRole.UserRole) == FileStatus.DONE:
+                done_count += 1
+        
         if done_count > 0:
             self._log(f"Skipping {done_count} already completed file(s)")
 
         # Disable controls during transfer
         self._set_controls_enabled(False)
-        self.stop_btn.setEnabled(True)
 
         # Stop auto-refresh during transfer
         self._scan_timer.stop()
@@ -527,6 +530,8 @@ class MainWindow(QMainWindow):
 
         self._log("Starting transfer...")
         self.overall_progress.setValue(0)
+        # Change button to "Stop Transfer"
+        self.transfer_btn.setText("Stop Transfer")
         # Set custom style on Linux/Windows to fix color issues
         # macOS uses native styling which looks better
         if sys.platform != "darwin":
@@ -551,11 +556,22 @@ class MainWindow(QMainWindow):
             self.worker.stop()
             self.worker.wait(2000)
             self.worker.deleteLater()
+            # Reset button text will be done in _on_all_completed
+
+    def _on_transfer_button_clicked(self):
+        """Handle transfer button click - start or stop based on current state."""
+        if self.worker and self.worker.isRunning():
+            # Transfer is running, stop it
+            self._stop_transfer()
+        else:
+            # No transfer running, start one
+            self._start_transfer()
 
     def _clear_completed(self):
         """Clear completed files from the list."""
         self.file_list.clear_completed()
         self._update_progress_label()
+        self._update_transfer_button_state()
 
     def _on_file_started(self, filename, total_bytes):
         """Handle file transfer starting."""
@@ -585,7 +601,7 @@ class MainWindow(QMainWindow):
         """Handle file transfer completion."""
         filepath = self._find_filepath_by_name(filename)
         if filepath:
-            self.file_list.set_file_status(filepath, "Done" if success else "Failed")
+            self.file_list.set_file_status(filepath, FileStatus.DONE if success else FileStatus.FAILED)
             # Mark file progress - green for success, red for failure
             self.file_list.set_file_progress(filepath, 100, 100, is_error=not success)
 
@@ -619,7 +635,19 @@ class MainWindow(QMainWindow):
     def _on_all_completed(self, all_successful):
         """Handle all transfers completing."""
         self._set_controls_enabled(True)
-        self.stop_btn.setEnabled(False)
+
+        # Check for failed transfers
+        failed_count = 0
+        for row in range(self.file_list.rowCount()):
+            status_item = self.file_list.item(row, 4)
+            if status_item and status_item.data(Qt.ItemDataRole.UserRole) == FileStatus.FAILED:
+                failed_count += 1
+
+        # Set button text based on state
+        if failed_count > 0:
+            self.transfer_btn.setText("Retry Transfer")
+        else:
+            self.transfer_btn.setText("Start Transfer")
 
         # Re-enable remove button if items are selected
         has_selection = len(self.file_list.selectedItems()) > 0
@@ -676,8 +704,10 @@ class MainWindow(QMainWindow):
         pending_count = 0
         for row in range(len(self.file_list.filepaths)):
             status_item = self.file_list.item(row, 4)
-            if status_item and status_item.text() not in ["Done", "Failed"]:
-                pending_count += 1
+            if status_item:
+                status = status_item.data(Qt.ItemDataRole.UserRole)
+                if status not in [FileStatus.DONE, FileStatus.FAILED]:
+                    pending_count += 1
 
         # Update button text based on whether there are pending files
         if pending_count > 0:
@@ -695,6 +725,7 @@ class MainWindow(QMainWindow):
         self._files_to_transfer = []
         self._current_file_index = 0
         self._update_progress_label()
+        self._update_transfer_button_state()
 
         # Restart auto-refresh timer
         self._scan_timer.start(3000)
@@ -714,8 +745,10 @@ class MainWindow(QMainWindow):
         """Get the filepath of the file currently being transferred."""
         for row, filepath in enumerate(self.file_list.filepaths):
             status_item = self.file_list.item(row, 4)  # Status is column 4
-            if status_item and status_item.text() == "Transferring...":
-                return filepath
+            if status_item:
+                status = status_item.data(Qt.ItemDataRole.UserRole)
+                if status == FileStatus.TRANSFERRING:
+                    return filepath
         return None
 
     def _set_controls_enabled(self, enabled):
@@ -726,7 +759,7 @@ class MainWindow(QMainWindow):
         self.verbose_cb.setEnabled(enabled)
         self.restart_cb.setEnabled(enabled)
         self.keep_compressed_cb.setEnabled(enabled)
-        self.transfer_btn.setEnabled(enabled)
+        # Transfer button stays enabled (text changes to Stop/Start)
         self.clear_btn.setEnabled(enabled)
 
         # Remove button is disabled during transfer
@@ -749,6 +782,26 @@ class MainWindow(QMainWindow):
             self.progress_label.setText("1 file")
         else:
             self.progress_label.setText(f"{count} files")
+
+    def _has_transferable_files(self):
+        """Check if there are any files in the queue that are not 'Done'."""
+        for row in range(self.file_list.rowCount()):
+            status_item = self.file_list.item(row, 4)
+            if status_item:
+                status = status_item.data(Qt.ItemDataRole.UserRole)
+                if status != FileStatus.DONE:
+                    return True
+        return False
+
+    def _update_transfer_button_state(self):
+        """Update the enabled state of the transfer button."""
+        # If a transfer is already running, the button should be enabled (it's the "Stop" button)
+        if self.worker and self.worker.isRunning():
+            self.transfer_btn.setEnabled(True)
+            return
+
+        has_files = self._has_transferable_files()
+        self.transfer_btn.setEnabled(self._crankboy_connected and has_files)
 
     def _toggle_log_visibility(self):
         """Toggle the visibility of the log view."""

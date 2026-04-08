@@ -8,6 +8,7 @@ from PyQt6.QtWidgets import (
 from PyQt6.QtCore import Qt, pyqtSignal
 from PyQt6.QtGui import QDragEnterEvent, QDropEvent
 from src.core.transfer_engine import get_file_info_with_crc
+from src.core.constants import FileStatus
 
 
 class FileListWidget(QTableWidget):
@@ -209,7 +210,8 @@ class FileListWidget(QTableWidget):
                 self.setItem(row, 3, ratio_item)
 
                 # Status column (centered)
-                status_item = QTableWidgetItem("Pending")
+                status_item = QTableWidgetItem(FileStatus.PENDING.value)
+                status_item.setData(Qt.ItemDataRole.UserRole, FileStatus.PENDING)
                 status_item.setFlags(status_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
                 status_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
                 self.setItem(row, 4, status_item)
@@ -281,8 +283,10 @@ class FileListWidget(QTableWidget):
         to_remove = []
         for row, filepath in enumerate(self.filepaths):
             status_item = self.item(row, 4)  # Status is column 4
-            if status_item and status_item.text() == "Done":
-                to_remove.append(filepath)
+            if status_item:
+                status = status_item.data(Qt.ItemDataRole.UserRole)
+                if status == FileStatus.DONE:
+                    to_remove.append(filepath)
 
         for filepath in to_remove:
             self.remove_file(filepath)
@@ -344,7 +348,7 @@ class FileListWidget(QTableWidget):
         except ValueError:
             pass
 
-    def set_file_status(self, filepath, status):
+    def set_file_status(self, filepath, status: FileStatus):
         """Update status for a file."""
         if filepath not in self.files_info:
             return
@@ -353,14 +357,15 @@ class FileListWidget(QTableWidget):
             row = self.filepaths.index(filepath)
             status_item = self.item(row, 4)  # Status is now column 4
             if status_item:
-                status_item.setText(status)
+                status_item.setText(status.value)
+                status_item.setData(Qt.ItemDataRole.UserRole, status)
                 # Qt automatically handles text color for dark/light mode
         except ValueError:
             pass
 
     def mark_transferring(self, filepath):
         """Mark a file as currently transferring."""
-        self.set_file_status(filepath, "Transferring...")
+        self.set_file_status(filepath, FileStatus.TRANSFERRING)
 
     def clear(self):
         """Clear all files."""

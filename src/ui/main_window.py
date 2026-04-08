@@ -114,32 +114,32 @@ class MainWindow(QMainWindow):
         controls_layout.addStretch()
 
         # Options (right-aligned)
+        self.keep_compressed_cb = QCheckBox("Compressed")
+        self.keep_compressed_cb.setChecked(self.settings.get_keep_compressed())
+        self.keep_compressed_cb.setToolTip("Transfer as GBZ files")
+        controls_layout.addWidget(self.keep_compressed_cb)
+
         self.restart_cb = QCheckBox("Restart")
         self.restart_cb.setChecked(self.settings.get_auto_restart())
         self.restart_cb.setToolTip("Restart CrankBoy after all transfers are completed")
         controls_layout.addWidget(self.restart_cb)
 
-        self.keep_compressed_cb = QCheckBox("Keep compressed")
-        self.keep_compressed_cb.setChecked(self.settings.get_keep_compressed())
-        self.keep_compressed_cb.setToolTip("Transfer as GBZ files (no decompression on device)")
-        controls_layout.addWidget(self.keep_compressed_cb)
-
         layout.addWidget(controls)
 
         # === Status Log (Collapsible) ===
         log_header_layout = QHBoxLayout()
-        
+
         self.log_toggle_btn = QPushButton("Show Log")
         log_header_layout.addWidget(self.log_toggle_btn)
-        
+
         # Add stretch to push verbose checkbox to the right
         log_header_layout.addStretch()
-        
+
         # Verbose checkbox (right-aligned, relates to log)
         self.verbose_cb = QCheckBox("Verbose")
         self.verbose_cb.setChecked(self.settings.get_verbose())
         log_header_layout.addWidget(self.verbose_cb)
-        
+
         layout.addLayout(log_header_layout)
 
         self.log_view = QTextEdit()
@@ -182,7 +182,7 @@ class MainWindow(QMainWindow):
 
         # All icons are in src/assets/
         icon_dir = Path(__file__).parent.parent / "assets"
-        
+
         # Determine icon file based on platform
         if sys.platform == "darwin":
             icon_file = "AppIcon.icns"
@@ -190,7 +190,7 @@ class MainWindow(QMainWindow):
             icon_file = "AppIcon.ico"
         else:
             icon_file = "AppIcon.png"
-        
+
         icon_path = icon_dir / icon_file
 
         # Also check for icon in PyInstaller bundle location
@@ -495,7 +495,7 @@ class MainWindow(QMainWindow):
             status_item = self.file_list.item(row, 4)
             if status_item and status_item.data(Qt.ItemDataRole.UserRole) == FileStatus.DONE:
                 done_count += 1
-        
+
         if done_count > 0:
             self._log(f"Skipping {done_count} already completed file(s)")
 

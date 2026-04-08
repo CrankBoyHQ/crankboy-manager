@@ -135,7 +135,7 @@ class FileListWidget(QTableWidget):
 
                     # Check if it's a ROM file
                     ext = os.path.splitext(item)[1].lower()
-                    if ext in ['.gb', '.gbc', '.gbz', '.zip']:
+                    if ext in ['.gb', '.gbc', '.gbz']:
                         # Extract to temp directory
                         zf.extract(item, temp_dir)
                         extracted_path = os.path.join(temp_dir, item)

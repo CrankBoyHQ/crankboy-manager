@@ -1,6 +1,7 @@
 """Main window for CrankBoy Manager."""
 
 import os
+import sys
 import time
 from PyQt6.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
@@ -159,7 +160,6 @@ class MainWindow(QMainWindow):
 
     def _set_window_icon(self):
         """Set the window icon from the bundled icon file."""
-        import sys
         from pathlib import Path
         from PyQt6.QtGui import QIcon
 
@@ -508,6 +508,20 @@ class MainWindow(QMainWindow):
 
         self._log("Starting transfer...")
         self.overall_progress.setValue(0)
+        # Set custom style on Linux/Windows to fix color issues
+        # macOS uses native styling which looks better
+        if sys.platform != "darwin":
+            self.overall_progress.setStyleSheet("""
+                QProgressBar {
+                    border: 1px solid #48f;
+                    border-radius: 3px;
+                    background: palette(base);
+                    text-align: center;
+                }
+                QProgressBar::chunk {
+                    background: #48f;
+                }
+            """)
         self.worker.start()
 
     def _stop_transfer(self):
@@ -595,10 +609,49 @@ class MainWindow(QMainWindow):
         if all_successful:
             self._log("All transfers completed successfully!")
             self.overall_progress.setValue(100)
+            # Set green style for successful completion (Linux/Windows only)
+            if sys.platform != "darwin":
+                self.overall_progress.setStyleSheet("""
+                    QProgressBar {
+                        border: 1px solid #4a4;
+                        border-radius: 3px;
+                        background: palette(base);
+                        text-align: center;
+                    }
+                    QProgressBar::chunk {
+                        background: #4a4;
+                    }
+                """)
         elif self._transfer_stopped:
             self._log("Transfer stopped by user.")
+            # Set red style for stopped transfer (Linux/Windows only)
+            if sys.platform != "darwin":
+                self.overall_progress.setStyleSheet("""
+                    QProgressBar {
+                        border: 1px solid #c44;
+                        border-radius: 3px;
+                        background: palette(base);
+                        text-align: center;
+                    }
+                    QProgressBar::chunk {
+                        background: #c44;
+                    }
+                """)
         else:
             self._log("Some transfers failed.")
+            # Set red style for failed transfers (Linux/Windows only)
+            if sys.platform != "darwin":
+                self.overall_progress.setStyleSheet("""
+                    QProgressBar {
+                        border: 1px solid #c44;
+                        border-radius: 3px;
+                        background: palette(base);
+                        text-align: center;
+                    }
+                    QProgressBar::chunk {
+                        background: #c44;
+                    }
+                """)
 
         # Check if there are still pending files to transfer
         pending_count = 0

@@ -80,9 +80,8 @@ class FileListWidget(QTableWidget):
                 # Scan folder for ROM files
                 added_files.extend(self._scan_folder(filepath))
             elif filepath.lower().endswith('.zip'):
-                # Extract ROMs from ZIP file
-                roms = self._extract_zip(filepath)
-                added_files.extend(roms)
+                # Extract ROMs from ZIP file (adds directly to list)
+                self._extract_zip(filepath)
             elif self._is_valid_rom(filepath):
                 added_files.append(filepath)
 
@@ -99,9 +98,8 @@ class FileListWidget(QTableWidget):
             for entry in os.scandir(folder_path):
                 if entry.is_file():
                     if entry.path.lower().endswith('.zip'):
-                        # Extract ROMs from ZIP files found in folders
-                        roms = self._extract_zip(entry.path)
-                        files.extend(roms)
+                        # Extract ROMs from ZIP files found in folders (adds directly to list)
+                        self._extract_zip(entry.path)
                     elif self._is_valid_rom(entry.path):
                         files.append(entry.path)
                 elif entry.is_dir():
@@ -116,7 +114,7 @@ class FileListWidget(QTableWidget):
         return ext in ['.gb', '.gbc', '.gbz', '.zip']
 
     def _extract_zip(self, zip_path):
-        """Extract ROM files from ZIP archive to temp directory."""
+        """Extract ROM files from ZIP archive and add them to the list."""
         import zipfile
         import tempfile
 
@@ -137,7 +135,7 @@ class FileListWidget(QTableWidget):
 
                     # Check if it's a ROM file
                     ext = os.path.splitext(item)[1].lower()
-                    if ext in ['.gb', '.gbc', '.gbz']:
+                    if ext in ['.gb', '.gbc', '.gbz', '.zip']:
                         # Extract to temp directory
                         zf.extract(item, temp_dir)
                         extracted_path = os.path.join(temp_dir, item)
@@ -145,24 +143,32 @@ class FileListWidget(QTableWidget):
 
         except zipfile.BadZipFile:
             self.log_message.emit(f"Error: {os.path.basename(zip_path)} is not a valid ZIP file")
-            return []
+            return 0
         except Exception as e:
             self.log_message.emit(f"Error extracting {os.path.basename(zip_path)}: {e}")
-            return []
+            return 0
 
+        # Log extraction count
         if extracted_files:
             self.log_message.emit(f"Extracted {len(extracted_files)} ROM(s) from {os.path.basename(zip_path)}")
+            # Add extracted files to the list (duplicate checking handled by _add_files)
+            self._add_files(extracted_files)
         else:
             self.log_message.emit(f"No ROM files found in {os.path.basename(zip_path)}")
 
-        return extracted_files
+        return len(extracted_files)
 
     def _add_files(self, filepaths):
         """Add files to the list."""
         added = []
+        # Get set of existing filenames to prevent duplicates
+        existing_names = {os.path.basename(fp) for fp in self.filepaths}
+
         for filepath in filepaths:
-            if filepath in self.files_info:
-                continue  # Skip duplicates
+            filename = os.path.basename(filepath)
+            if filepath in self.files_info or filename in existing_names:
+                self.log_message.emit(f"Skipping {filename} (already in list)")
+                continue  # Skip duplicates (by full path or filename)
 
             try:
                 file_info = get_file_info_with_crc(filepath)
@@ -244,6 +250,7 @@ class FileListWidget(QTableWidget):
                 progress_widget.progress_bar = progress_bar
 
                 added.append(filepath)
+                existing_names.add(filename)  # Track to prevent duplicates within same batch
             except Exception as e:
                 print(f"Error adding file {filepath}: {e}")
 
@@ -255,12 +262,13 @@ class FileListWidget(QTableWidget):
         all_files = []
         for filepath in filepaths:
             if filepath.lower().endswith('.zip'):
-                # Extract ROMs from ZIP file
-                roms = self._extract_zip(filepath)
-                all_files.extend(roms)
+                # Extract ROMs from ZIP file (adds directly to list)
+                self._extract_zip(filepath)
             elif self._is_valid_rom(filepath):
                 all_files.append(filepath)
-        self._add_files(all_files)
+        # Add regular ROM files (ZIP files are already added by _extract_zip)
+        if all_files:
+            self._add_files(all_files)
 
     def remove_file(self, filepath):
         """Remove a file from the list."""

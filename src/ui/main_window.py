@@ -172,6 +172,23 @@ class MainWindow(QMainWindow):
         self.overall_progress = QProgressBar()
         self.overall_progress.setRange(0, 100)
         self.overall_progress.setValue(0)
+        
+        # Set initial styling for Linux/Windows (proper height and appearance)
+        # macOS uses native styling
+        if sys.platform != "darwin":
+            self.overall_progress.setStyleSheet("""
+                QProgressBar {
+                    border: 1px solid palette(mid);
+                    border-radius: 3px;
+                    background: palette(base);
+                    text-align: center;
+                    min-height: 20px;
+                }
+                QProgressBar::chunk {
+                    background: palette(highlight);
+                }
+            """)
+        
         progress_layout.addWidget(self.overall_progress, stretch=1)
         self.progress_label = QLabel("0/0")
         progress_layout.addWidget(self.progress_label)

@@ -10,6 +10,7 @@ import sys
 import shutil
 import subprocess
 import platform
+from datetime import datetime
 from pathlib import Path
 
 
@@ -205,10 +206,53 @@ Comment=Transfer Game Boy ROMs to CrankBoy
     with open(f"{appdir}/{APP_NAME.lower()}.desktop", "w") as f:
         f.write(desktop)
 
+    # Create AppStream metadata (for AppImage compliance)
+    os.makedirs(f"{appdir}/usr/share/metainfo", exist_ok=True)
+    date_str = datetime.now().strftime("%Y-%m-%d")
+    appstream_xml = f"""<?xml version="1.0" encoding="UTF-8"?>
+<component type="desktop-application">
+  <id>crankboymanager</id>
+  <metadata_license>CC0-1.0</metadata_license>
+  <project_name>{APP_DISPLAY_NAME}</project_name>
+  <summary>Transfer Game Boy ROMs to CrankBoy</summary>
+  <description>
+    <p>CrankBoy Manager is a desktop application for transferring Game Boy ROMs to your Playdate device running CrankBoy.</p>
+    <p>Features:</p>
+    <ul>
+      <li>Drag and drop ROM files</li>
+      <li>Support for .gb, .gbc, and .gbz files</li>
+      <li>ZIP archive support</li>
+      <li>Automatic cover art download</li>
+      <li>Batch transfer multiple ROMs</li>
+    </ul>
+  </description>
+  <launchable type="desktop-id">{APP_NAME.lower()}.desktop</launchable>
+  <url type="homepage">https://crankboy.app</url>
+  <developer_name>CrankBoy Dev Team</developer_name>
+  <content_rating type="oars-1.1"/>
+  <releases>
+    <release version="{VERSION}" date="{date_str}">
+      <description>
+        <p>Initial release</p>
+      </description>
+    </release>
+  </releases>
+</component>
+"""
+    with open(f"{appdir}/usr/share/metainfo/{APP_NAME.lower()}.appdata.xml", "w") as f:
+        f.write(appstream_xml)
+
     # Copy the icon file for Linux AppImage
-    icon_path = f"{appdir}/{APP_NAME.lower()}.png"
+    icon_filename = f"{APP_NAME.lower()}.png"
+    icon_path = f"{appdir}/{icon_filename}"
     if ICON_FILE_LINUX and os.path.exists(ICON_FILE_LINUX):
+        # Copy to root directory (AppImage spec)
         shutil.copy(ICON_FILE_LINUX, icon_path)
+        
+        # Also copy to system icons directory for desktop integration
+        icon_dir = f"{appdir}/usr/share/icons/hicolor/256x256/apps"
+        os.makedirs(icon_dir, exist_ok=True)
+        shutil.copy(ICON_FILE_LINUX, f"{icon_dir}/{icon_filename}")
 
     # Download and run appimagetool to create the AppImage
     appimage_name = f"{APP_NAME}-{VERSION}-x86_64.AppImage"

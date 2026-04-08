@@ -15,8 +15,26 @@ class Spinner(QWidget):
         self._opacity = 1.0
         self._timer = QTimer(self)
         self._timer.timeout.connect(self._animate)
-        self._timer.start(50)
         self._color = QColor(100, 100, 100)
+        # Don't start timer immediately - wait for show()
+
+    def showEvent(self, event):
+        """Start animation when widget is shown."""
+        super().showEvent(event)
+        if not self._timer.isActive():
+            self._timer.start(50)
+
+    def hideEvent(self, event):
+        """Stop animation when widget is hidden."""
+        super().hideEvent(event)
+        if self._timer.isActive():
+            self._timer.stop()
+
+    def closeEvent(self, event):
+        """Ensure timer is stopped when widget is closed."""
+        if self._timer.isActive():
+            self._timer.stop()
+        super().closeEvent(event)
 
     def _animate(self):
         if not self._fading_out:

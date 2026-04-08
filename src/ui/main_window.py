@@ -234,6 +234,9 @@ class MainWindow(QMainWindow):
 
     def _start_port_scan(self):
         """Start port scan in background thread."""
+        # Skip if timer is stopped (shutting down)
+        if not self._scan_timer.isActive():
+            return
         # Skip if transfer is in progress or scan already running
         if self.worker and self.worker.isRunning():
             return
@@ -923,8 +926,11 @@ class MainWindow(QMainWindow):
                 event.ignore()
                 return
 
-        # Stop auto-refresh timer
+        # Stop auto-refresh timer FIRST to prevent new scans from starting
         self._scan_timer.stop()
+
+        # Stop spinner animation
+        self.scan_indicator.hide()
 
         # Stop port scanner if running
         if self._scanner_worker and self._scanner_worker.isRunning():

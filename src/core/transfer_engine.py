@@ -76,6 +76,30 @@ def compress_to_gbz(data, is_gbc=True):
     return gbz_data, original_crc, gbz_crc
 
 
+def get_rom_cgb_support(filepath):
+    """
+    Read ROM header to determine CGB (Color Game Boy) support.
+    
+    Checks byte at offset 0x143 in the ROM header:
+    - 0x80: Supports both DMG (original GB) and CGB (Color)
+    - 0xC0: CGB only (Color only)
+    - Other: DMG only (original Game Boy)
+    
+    Returns True if ROM supports CGB mode.
+    """
+    try:
+        with open(filepath, 'rb') as f:
+            f.seek(0x143)
+            cgb_byte = f.read(1)
+            if len(cgb_byte) == 0:
+                return False
+            cgb_byte = cgb_byte[0]
+            # 0x80 = DMG+CGB, 0xC0 = CGB only
+            return cgb_byte in (0x80, 0xC0)
+    except (IOError, OSError):
+        return False
+
+
 def get_file_info(filepath, keep_compressed=False):
     """
     Get file information for transfer.
@@ -97,7 +121,7 @@ def get_file_info(filepath, keep_compressed=False):
     """
     filename = os.path.basename(filepath)
     ext = os.path.splitext(filepath)[1].lower()
-    is_gbc = ext == '.gbc'
+    is_gbc = get_rom_cgb_support(filepath) if ext in ('.gb', '.gbc') else False
     
     info = {
         'filepath': filepath,

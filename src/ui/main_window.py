@@ -108,7 +108,8 @@ class MainWindow(QMainWindow):
         # Port selection
         controls_layout.addWidget(QLabel("Port:"))
         self.port_combo = QComboBox()
-        self.port_combo.setMinimumWidth(370)
+        # Ensure it sizes based on content
+        self.port_combo.setSizeAdjustPolicy(QComboBox.SizeAdjustPolicy.AdjustToContents)
         controls_layout.addWidget(self.port_combo)
 
         # Push options to the right
@@ -243,6 +244,7 @@ class MainWindow(QMainWindow):
                 self.port_combo.addItem("Playdate disconnected", None)
                 self._log("Playdate disconnected")
             self.port_combo.setEnabled(False)
+            self.port_combo.setToolTip("")
             self._update_transfer_button_state()
             return
 
@@ -253,8 +255,10 @@ class MainWindow(QMainWindow):
             port_info = result['port']
             device = port_info['device']
             version = port_info['version']
-            label = f"CrankBoy {version} - {device}"
+            label = f"CrankBoy {version}"
             self.port_combo.addItem(label, device)
+            self.port_combo.setItemData(0, f"Device: {device}", Qt.ItemDataRole.ToolTipRole)
+            self.port_combo.setToolTip(f"Connected to {device}")
             self._log(f"CrankBoy {version} detected on {device}")
             self.port_combo.setEnabled(True)
             self._update_transfer_button_state()
@@ -271,8 +275,10 @@ class MainWindow(QMainWindow):
                 port_info = result['port']
                 device = port_info['device']
                 version = port_info['version']
-                label = f"CrankBoy {version} - {device}"
+                label = f"CrankBoy {version}"
                 self.port_combo.addItem(label, device)
+                self.port_combo.setItemData(0, f"Device: {device}", Qt.ItemDataRole.ToolTipRole)
+                self.port_combo.setToolTip(f"Connected to {device}")
                 self._log(f"CrankBoy {version} detected on {device}")
                 self.port_combo.setEnabled(True)
                 self._update_transfer_button_state()
@@ -286,6 +292,7 @@ class MainWindow(QMainWindow):
                     self.port_combo.clear()
                     self.port_combo.addItem("CrankBoy not running", None)
                     self.port_combo.setEnabled(False)
+                    self.port_combo.setToolTip("")
                     self._log(result['message'])
                     self._update_transfer_button_state()
             else:
@@ -293,6 +300,7 @@ class MainWindow(QMainWindow):
                     self.port_combo.clear()
                     self.port_combo.addItem("Playdate not connected", None)
                     self.port_combo.setEnabled(False)
+                    self.port_combo.setToolTip("")
                     self._log(result['message'])
                     self._update_transfer_button_state()
 

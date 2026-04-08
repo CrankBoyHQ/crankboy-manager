@@ -32,6 +32,7 @@ class CoverDownloadWorker(QThread):
         self._lock = threading.Lock()
         self._queue_lock = threading.Lock()
         self._active_count = 0
+        self._emitted_completion = False  # Track if we already emitted for current batch
 
     def add_to_queue(self, file_info_list):
         """Thread-safe method to add files to download queue.
@@ -47,6 +48,12 @@ class CoverDownloadWorker(QThread):
                 if crc and file_info.get('cover_data') is None:
                     self._queue.put(file_info)
                     added_count += 1
+        
+        # Reset completion flag when new work is added
+        if added_count > 0:
+            with self._lock:
+                self._emitted_completion = False
+        
         return added_count
 
     def stop(self):
@@ -67,11 +74,17 @@ class CoverDownloadWorker(QThread):
         crc = file_info.get('original_crc')
 
         if not crc:
+            with self._lock:
+                self._active_count -= 1
+                self._completed_count += 1
             return False, "No CRC available"
 
         # Get cover info from database
         cover_info = rom_database.get_cover_info(crc)
         if not cover_info:
+            with self._lock:
+                self._active_count -= 1
+                self._completed_count += 1
             return False, "Not in database"
 
         cover_filename = cover_info['filename']
@@ -162,10 +175,11 @@ class CoverDownloadWorker(QThread):
 
             # Emit all_completed when queue is empty and no active downloads
             if self._queue.empty() and not active_threads:
-                # Only emit if we had some activity (don't emit on startup)
+                # Only emit if we had some activity and haven't emitted yet
                 with self._lock:
-                    if self._completed_count > 0 or self._active_count > 0:
+                    if (self._completed_count > 0 or self._active_count > 0) and not self._emitted_completion:
                         self.all_completed.emit()
+                        self._emitted_completion = True
                         self._completed_count = 0  # Reset for next batch
 
             # Sleep when idle to prevent busy-waiting

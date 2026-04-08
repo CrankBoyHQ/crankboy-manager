@@ -126,10 +126,11 @@ class MainWindow(QMainWindow):
         controls_layout.addStretch()
 
         # Options (right-aligned)
-        self.keep_compressed_cb = QCheckBox("Compressed")
+        self.keep_compressed_cb = QCheckBox("GBZ")
         self.keep_compressed_cb.setChecked(self.settings.get_keep_compressed())
-        self.keep_compressed_cb.setToolTip("Transfer as GBZ files")
+        self.keep_compressed_cb.setToolTip("Store ROMs in GBZ format on device")
         controls_layout.addWidget(self.keep_compressed_cb)
+
 
         self.restart_cb = QCheckBox("Restart")
         self.restart_cb.setChecked(self.settings.get_auto_restart())

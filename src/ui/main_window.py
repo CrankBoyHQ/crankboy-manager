@@ -624,9 +624,13 @@ class MainWindow(QMainWindow):
         """Handle file transfer completion."""
         filepath = self._find_filepath_by_name(filename)
         if filepath:
-            self.file_list.set_file_status(filepath, FileStatus.DONE if success else FileStatus.FAILED)
-            # Mark file progress - green for success, red for failure
-            self.file_list.set_file_progress(filepath, 100, 100, is_error=not success)
+            is_user_stopped = message == "User stopped"
+            if is_user_stopped:
+                self.file_list.set_file_status(filepath, FileStatus.PENDING)
+                self.file_list.set_file_progress(filepath, 0, 100)
+            else:
+                self.file_list.set_file_status(filepath, FileStatus.DONE if success else FileStatus.FAILED)
+                self.file_list.set_file_progress(filepath, 100, 100, is_error=not success)
             self._update_clear_button_state()
 
         # Add to completed bytes for overall progress

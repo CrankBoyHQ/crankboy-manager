@@ -76,23 +76,34 @@ class SerialWorker(QThread):
                 if not self._is_running:
                     break
 
+                filename = file_info['filename']
+                rom_size = file_info['gbz_size']
+                cover_data = file_info.get('cover_data')
+                cover_size = len(cover_data) if cover_data else 0
+                combined_total = rom_size + cover_size
+
+                self.file_started.emit(filename, combined_total)
+                self.log_message.emit(f"Transferring: {filename}")
+
                 # Transfer ROM file
-                success = self._transfer_file(ser, file_info)
+                success, message = self._transfer_file(ser, file_info, combined_total)
                 if not success:
                     all_successful = False
-                    continue  # Don't try to transfer cover if ROM failed
+                    self.file_completed.emit(filename, False, message)
+                    continue
 
                 # Mark that at least one ROM succeeded
                 any_successful = True
 
-                # Transfer cover art if available (doesn't affect success status)
-                cover_data = file_info.get('cover_data')
+                # Transfer cover art if available
                 cover_filename = file_info.get('cover_filename')
                 if cover_data and cover_filename:
-                    cover_success = self._transfer_cover(ser, cover_data, cover_filename)
+                    cover_success, cover_message = self._transfer_cover(ser, cover_data, cover_filename, combined_total, rom_size)
                     if not cover_success:
-                        # Cover transfer failure doesn't mark overall as failed
-                        self.log_message.emit(f"  Cover transfer failed: {cover_filename}")
+                        # Cover transfer failure doesn't mark overall as failed, but we log it
+                        self.log_message.emit(f"  Cover transfer failed: {cover_filename} - {cover_message}")
+
+                self.file_completed.emit(filename, True, message)
 
             # Restart if requested and at least one ROM succeeded
             if any_successful and self.restart and self._is_running:
@@ -121,7 +132,7 @@ class SerialWorker(QThread):
             self.error_occurred.emit("", f"Error: {e}")
             self.all_completed.emit(False)
     
-    def _transfer_file(self, ser, file_info):
+    def _transfer_file(self, ser, file_info, combined_total):
         """Transfer a single file using window-based pipelining."""
         filename = file_info['filename']
         gbz_data = file_info['gbz_data']
@@ -130,9 +141,6 @@ class SerialWorker(QThread):
         original_filename = file_info['original_filename']
         original_crc = file_info['original_crc']
         
-        self.file_started.emit(filename, gbz_size)
-        self.log_message.emit(f"Transferring: {filename}")
-
         try:
             # Send begin command
             encoded_filename = urllib.parse.quote(file_info.get('gbz_filename', filename), safe='')
@@ -150,8 +158,7 @@ class SerialWorker(QThread):
             # Wait for ready response (format: WWCC where WW=window, CC=chunk)
             ready_params = self._wait_for_response(ser, "r", timeout=5)
             if ready_params is None:
-                self.file_completed.emit(filename, False, "Device not ready")
-                return False
+                return False, "Device not ready"
 
             # Parse window size and chunk size
             try:
@@ -257,31 +264,30 @@ class SerialWorker(QThread):
                                 self._log(f"CRC error for chunk {nack_seq:04X}")
                             elif nack_code in ("write", "size"):
                                 # Fatal error - abort current file
-                                self.file_completed.emit(filename, False, f"Device error: {nack_code}")
-                                return False
+                                return False, f"Device error: {nack_code}"
                         except (ValueError, IndexError):
                             pass
                     return True
                 
                 elif cmd == "x":
                     # Device error - abort current file
-                    self.file_completed.emit(filename, False, f"Device error: {params}")
-                    return False
+                    return False, f"Device error: {params}"
                 
                 return True  # Unknown command but not fatal
             
             # Main transfer loop
             while highest_acked < total_chunks - 1:
                 if not self._is_running:
-                    return False
+                    return False, "User stopped"
                 
                 # Fill the window
                 send_window()
                 
                 # Process responses
                 if in_flight:
-                    process_response(timeout=0.2)
-                    # Continue regardless of response - timeouts are handled below
+                    proc_res = process_response(timeout=0.2)
+                    if isinstance(proc_res, tuple) and proc_res[0] is False:
+                        return False, proc_res[1]
                     
                     # Check for timeouts
                     current_time = time.time()
@@ -300,8 +306,7 @@ class SerialWorker(QThread):
                                     in_flight[seq]['time'] = current_time
                                     in_flight[seq]['retries'] += 1
                                 else:
-                                    self.file_completed.emit(filename, False, f"Max retries exceeded for chunk {seq:04X}")
-                                    return False
+                                    return False, f"Max retries exceeded for chunk {seq:04X}"
                         else:
                             # Repeated timeouts - use selective retransmit
                             self._log("Querying device status for selective retransmit")
@@ -352,8 +357,7 @@ class SerialWorker(QThread):
                                                     in_flight[seq]['time'] = current_time
                                                     in_flight[seq]['retries'] += 1
                                                 else:
-                                                    self.file_completed.emit(filename, False, f"Max retries exceeded for chunk {seq:04X}")
-                                                    return False
+                                                    return False, f"Max retries exceeded for chunk {seq:04X}"
                                         except ValueError:
                                             pass
                 else:
@@ -362,10 +366,10 @@ class SerialWorker(QThread):
                 # Update progress
                 chunks_completed = highest_acked + 1
                 bytes_sent = sum(len(chunks[i]) for i in range(min(chunks_completed, total_chunks)))
-                self.file_progress.emit(bytes_sent, gbz_size)
+                self.file_progress.emit(bytes_sent, combined_total)
             
             if not self._is_running:
-                return False
+                return False, "User stopped"
             
             # Send end command
             send_command(ser, f"ft:e:{crc_hex}")
@@ -373,15 +377,12 @@ class SerialWorker(QThread):
             # Wait for OK
             ok_response = self._wait_for_response(ser, "o", timeout=10)
             if ok_response is None:
-                self.file_completed.emit(filename, False, "Transfer not confirmed")
-                return False
+                return False, "Transfer not confirmed"
             
-            self.file_completed.emit(filename, True, f"Saved as {ok_response}")
-            return True
+            return True, f"Saved as {ok_response}"
             
         except Exception as e:
-            self.file_completed.emit(filename, False, str(e))
-            return False
+            return False, str(e)
     
     def _send_chunk_data(self, ser, seq, chunk_data):
         """Send chunk data without waiting for response."""
@@ -394,7 +395,7 @@ class SerialWorker(QThread):
         cmd = f"ft:c:{seq_hex}:{crc16_hex}:{b64_data}"
         send_command(ser, cmd)
     
-    def _transfer_cover(self, ser, cover_data, cover_filename):
+    def _transfer_cover(self, ser, cover_data, cover_filename, combined_total, offset):
         """Transfer cover art to the covers directory.
 
         Covers are transferred using the same ft protocol but with a special
@@ -418,8 +419,7 @@ class SerialWorker(QThread):
             # Wait for ready response
             ready_params = self._wait_for_response(ser, "r", timeout=5)
             if ready_params is None:
-                self.cover_completed.emit(cover_filename, False, "Device not ready")
-                return False
+                return False, "Device not ready"
 
             # Parse window size and chunk size
             try:
@@ -514,28 +514,28 @@ class SerialWorker(QThread):
                                     in_flight[nack_seq]['retries'] += 1
                             elif nack_code in ("write", "size"):
                                 # Fatal error - abort current cover
-                                self.cover_completed.emit(cover_filename, False, f"Device error: {nack_code}")
-                                return False
+                                return False, f"Device error: {nack_code}"
                         except (ValueError, IndexError):
                             pass
                     return True
 
                 elif cmd == "x":
                     # Device error - abort current cover
-                    self.cover_completed.emit(cover_filename, False, f"Device error: {params}")
-                    return False
+                    return False, f"Device error: {params}"
 
                 return True
 
             # Main transfer loop
             while highest_acked < total_chunks - 1:
                 if not self._is_running:
-                    return False
+                    return False, "User stopped"
 
                 send_window()
 
                 if in_flight:
-                    process_response(timeout=0.2)
+                    proc_res = process_response(timeout=0.2)
+                    if isinstance(proc_res, tuple) and proc_res[0] is False:
+                        return False, proc_res[1]
 
                     current_time = time.time()
                     timeouts = [(seq, info) for seq, info in in_flight.items()
@@ -552,8 +552,7 @@ class SerialWorker(QThread):
                                     in_flight[seq]['time'] = current_time
                                     in_flight[seq]['retries'] += 1
                                 else:
-                                    self.cover_completed.emit(cover_filename, False, f"Max retries exceeded for chunk {seq:04X}")
-                                    return False
+                                    return False, f"Max retries exceeded for chunk {seq:04X}"
                         else:
                             self._log("Querying device status for selective retransmit")
                             send_command(ser, "ft:s")
@@ -597,20 +596,20 @@ class SerialWorker(QThread):
                                                     in_flight[seq]['time'] = current_time
                                                     in_flight[seq]['retries'] += 1
                                                 else:
-                                                    self.cover_completed.emit(cover_filename, False, f"Max retries exceeded for chunk {seq:04X}")
-                                                    return False
+                                                    return False, f"Max retries exceeded for chunk {seq:04X}"
                                         except ValueError:
                                             pass
                 else:
                     time.sleep(0.01)
 
-                # Update progress (reuse file_progress signal)
+                # Update progress
                 chunks_completed = highest_acked + 1
                 bytes_sent = sum(len(chunks[i]) for i in range(min(chunks_completed, total_chunks)))
-                # Don't emit progress for cover to avoid confusing the main progress bar
+                # Emit combined progress for cover
+                self.file_progress.emit(offset + bytes_sent, combined_total)
 
             if not self._is_running:
-                return False
+                return False, "User stopped"
 
             # Send end command
             send_command(ser, f"ft:e:{crc_hex}")
@@ -618,15 +617,13 @@ class SerialWorker(QThread):
             # Wait for OK
             ok_response = self._wait_for_response(ser, "o", timeout=10)
             if ok_response is None:
-                self.cover_completed.emit(cover_filename, False, "Transfer not confirmed")
-                return False
+                return False, "Transfer not confirmed"
 
             self.cover_completed.emit(cover_filename, True, f"Saved as {ok_response}")
-            return True
+            return True, f"Saved as {ok_response}"
 
         except Exception as e:
-            self.cover_completed.emit(cover_filename, False, str(e))
-            return False
+            return False, str(e)
 
     def _wait_for_response(self, ser, expected_cmd, timeout=5):
         """Wait for a specific response from device."""

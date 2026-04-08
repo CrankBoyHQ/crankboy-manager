@@ -487,7 +487,8 @@ class MainWindow(QMainWindow):
         # Track overall progress (only for files being transferred)
         self._files_to_transfer = files
         self._current_file_index = 0
-        self._total_bytes_all_files = sum(f['gbz_size'] for f in files)
+        # Include cover data size in total if present
+        self._total_bytes_all_files = sum(f['gbz_size'] + (len(f['cover_data']) if f.get('cover_data') else 0) for f in files)
         self._bytes_completed = 0
         self._current_file_bytes = 0
         self._current_file_total = 0

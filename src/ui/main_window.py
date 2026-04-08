@@ -57,11 +57,12 @@ class MainWindow(QMainWindow):
         self._scan_timer.timeout.connect(self._start_port_scan)
         self._scan_timer.start(3000)
 
-        # Initial scan
-        self.port_combo.addItem("Scanning for Playdate...", None)
+        # Initial state - delay first scan to allow UI to fully load
+        self.port_combo.addItem("Initializing...", None)
         self.port_combo.setEnabled(False)
         self.scan_indicator.show()
-        self._start_port_scan()
+        # Delay first scan by 500ms to allow UI to fully render
+        QTimer.singleShot(500, self._start_port_scan)
 
         # Update button states
         self._update_transfer_button_state()

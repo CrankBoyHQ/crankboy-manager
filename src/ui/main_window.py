@@ -355,12 +355,6 @@ class MainWindow(QMainWindow):
         if not filepaths:
             return
 
-        # Stop any existing cover download worker
-        if self._cover_download_worker and self._cover_download_worker.isRunning():
-            self._cover_download_worker.stop()
-            self._cover_download_worker.wait(1000)
-            self._cover_download_worker.deleteLater()
-
         # Get references to EXISTING file_info objects from file_list
         # This ensures cover data is stored in the same objects used during transfer
         file_info_list = []
@@ -375,14 +369,18 @@ class MainWindow(QMainWindow):
         if not file_info_list:
             return
 
-        # Start cover download worker with references to existing file_info objects
-        self._cover_download_worker = CoverDownloadWorker(file_info_list, max_concurrent=20)
-        self._cover_download_worker.cover_started.connect(self._on_cover_download_started)
-        self._cover_download_worker.cover_completed.connect(self._on_cover_download_completed)
-        self._cover_download_worker.all_completed.connect(self._on_all_covers_completed)
+        # Create worker lazily if needed
+        if self._cover_download_worker is None:
+            self._cover_download_worker = CoverDownloadWorker(max_concurrent=20)
+            self._cover_download_worker.cover_started.connect(self._on_cover_download_started)
+            self._cover_download_worker.cover_completed.connect(self._on_cover_download_completed)
+            self._cover_download_worker.all_completed.connect(self._on_all_covers_completed)
+            self._cover_download_worker.start()
 
-        self._log("  Starting cover downloads...")
-        self._cover_download_worker.start()
+        # Add files to worker's queue
+        added_count = self._cover_download_worker.add_to_queue(file_info_list)
+        if added_count > 0:
+            self._log(f"  Queued {added_count} cover download(s)...")
 
     def _on_cover_download_started(self, rom_filename, cover_filename):
         """Handle cover download starting."""
@@ -396,11 +394,8 @@ class MainWindow(QMainWindow):
             self._log(f"    Cover not available for {rom_filename}: {message}")
 
     def _on_all_covers_completed(self):
-        """Handle all cover downloads completing."""
+        """Handle all cover downloads completing (queue empty)."""
         self._log("  All cover downloads completed")
-        if self._cover_download_worker:
-            self._cover_download_worker.deleteLater()
-        self._cover_download_worker = None
 
     def _on_selection_changed(self):
         """Handle selection change in file list."""
@@ -912,7 +907,7 @@ class MainWindow(QMainWindow):
         """Handle window close."""
         # Check if any operations are in progress
         is_transferring = self.worker and self.worker.isRunning()
-        is_downloading = self._cover_download_worker and self._cover_download_worker.isRunning()
+        is_downloading = self._cover_download_worker and self._cover_download_worker.has_work()
 
         if is_transferring or is_downloading:
             msg = "A transfer is currently in progress." if is_transferring else "Cover downloads are in progress."

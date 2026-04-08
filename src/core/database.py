@@ -153,12 +153,11 @@ def encode_cover_filename(name: str) -> str:
     while i < len(name):
         char = name[i]
 
-        # Handle UTF-8 é (0xC3 0xA9)
-        if (i + 1 < len(name) and
-            ord(char) == 0xC3 and
-            ord(name[i + 1]) == 0xA9):
+        # Handle é (Unicode U+00E9) -> e
+        # CrankBoy strips accents from é
+        if char == 'é':
             result.append('e')
-            i += 2
+            i += 1
             continue
 
         # Handle special characters

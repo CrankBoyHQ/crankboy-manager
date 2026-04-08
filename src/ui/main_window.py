@@ -129,9 +129,7 @@ class MainWindow(QMainWindow):
         # === Status Log (Collapsible) ===
         log_header_layout = QHBoxLayout()
         
-        self.log_toggle_btn = QPushButton("Show Log ▼")
-        self.log_toggle_btn.setFlat(True)
-        self.log_toggle_btn.setStyleSheet("QPushButton { text-align: left; padding: 5px; }")
+        self.log_toggle_btn = QPushButton("Show Log")
         log_header_layout.addWidget(self.log_toggle_btn)
         
         # Add stretch to push verbose checkbox to the right
@@ -812,9 +810,9 @@ class MainWindow(QMainWindow):
         """Set the visibility of the log view and update button text."""
         self.log_view.setVisible(visible)
         if visible:
-            self.log_toggle_btn.setText("Hide Log ▼")
+            self.log_toggle_btn.setText("Hide Log")
         else:
-            self.log_toggle_btn.setText("Show Log ▶")
+            self.log_toggle_btn.setText("Show Log")
         # Save to settings
         if hasattr(self.settings, 'set_log_visible'):
             self.settings.set_log_visible(visible)

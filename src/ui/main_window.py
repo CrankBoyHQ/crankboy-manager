@@ -19,6 +19,7 @@ from src.core.port_scanner_worker import PortScannerWorker
 from src.core.cover_download_worker import CoverDownloadWorker
 from src.core.transfer_engine import send_command, read_response
 from src.core.constants import FileStatus
+from src.ui.spinner import Spinner
 
 
 class MainWindow(QMainWindow):
@@ -56,6 +57,9 @@ class MainWindow(QMainWindow):
         self._scan_timer.start(3000)
 
         # Initial scan
+        self.port_combo.addItem("Scanning for Playdate...", None)
+        self.port_combo.setEnabled(False)
+        self.scan_indicator.show()
         self._start_port_scan()
 
         # Update button states
@@ -111,6 +115,12 @@ class MainWindow(QMainWindow):
         # Ensure it sizes based on content
         self.port_combo.setSizeAdjustPolicy(QComboBox.SizeAdjustPolicy.AdjustToContents)
         controls_layout.addWidget(self.port_combo)
+
+        # Scanning indicator (circular spinner)
+        self.scan_indicator = Spinner(size=18)
+        self.scan_indicator.hide()
+        controls_layout.addWidget(self.scan_indicator)
+
 
         # Push options to the right
         controls_layout.addStretch()
@@ -210,12 +220,9 @@ class MainWindow(QMainWindow):
         if self._scanner_worker and self._scanner_worker.isRunning():
             return
 
-        # Show scanning indicator
+        # Show scanning indicator if no CrankBoy is currently connected
         if not self._crankboy_connected:
-            current_text = self.port_combo.currentText()
-            if not current_text or current_text == "":
-                self.port_combo.clear()
-                self.port_combo.addItem("Scanning...", None)
+            self.scan_indicator.show()
 
         # Start scan in background
         self._scanner_worker.start()
@@ -226,83 +233,70 @@ class MainWindow(QMainWindow):
         was_connected = self._crankboy_connected
         is_connected = result['status'] == 'connected_running'
 
-        # Handle disconnection
-        if was_connected and not is_connected:
+        # Only hide if we actually found something
+        if is_connected:
+            self.scan_indicator.hide()
+
+        # Save current selection to restore it if possible
+        current_selection = self.port_combo.currentData()
+
+        # Handle new connection status
+        if is_connected:
+            self._crankboy_connected = True
+            self.port_combo.setEnabled(True)
+
+            # Update list of ports if it changed
+            new_ports = result['ports']
+
+            # Simple check to see if ports list is different
+            current_ports = []
+            for i in range(self.port_combo.count()):
+                data = self.port_combo.itemData(i)
+                if data:
+                    current_ports.append(data)
+
+            new_port_devices = [p['device'] for p in new_ports]
+
+            if set(current_ports) != set(new_port_devices):
+                self.port_combo.clear()
+                for i, port in enumerate(new_ports):
+                    device = port['device']
+                    version = port['version']
+                    label = f"CrankBoy {version}"
+                    self.port_combo.addItem(label, device)
+                    self.port_combo.setItemData(i, f"Device: {device}", Qt.ItemDataRole.ToolTipRole)
+
+                # Restore selection if it still exists
+                index = self.port_combo.findData(current_selection)
+                if index >= 0:
+                    self.port_combo.setCurrentIndex(index)
+                else:
+                    self.port_combo.setCurrentIndex(0)
+
+            # Update main tooltip for current selection
+            active_device = self.port_combo.currentData()
+            if active_device:
+                self.port_combo.setToolTip(f"Connected to {active_device}")
+
+            if not was_connected:
+                self._log(result['message'])
+
+        else:
+            # Not connected or not running
             self._crankboy_connected = False
-            self.port_combo.clear()
-            # When we were connected but now can't find it, check if Playdate hardware is still there
-            if result['status'] == 'connected_not_running':
-                # Playdate USB still present but CrankBoy not responding
-                self.port_combo.addItem("CrankBoy not running", None)
-                self._log("CrankBoy stopped - please restart CrankBoy")
-            elif result['status'] == 'not_connected':
-                # Check if this is a temporary disconnect (CrankBoy stopping) or full disconnect
-                # If we were just connected, assume CrankBoy stopped rather than unplugged
-                self.port_combo.addItem("CrankBoy not running", None)
-                self._log("CrankBoy stopped - please restart CrankBoy")
-            else:
-                self.port_combo.addItem("Playdate disconnected", None)
-                self._log("Playdate disconnected")
             self.port_combo.setEnabled(False)
             self.port_combo.setToolTip("")
-            self._update_transfer_button_state()
-            return
 
-        # Handle new connection
-        if not was_connected and is_connected:
-            self._crankboy_connected = True
-            self.port_combo.clear()
-            port_info = result['port']
-            device = port_info['device']
-            version = port_info['version']
-            label = f"CrankBoy {version}"
-            self.port_combo.addItem(label, device)
-            self.port_combo.setItemData(0, f"Device: {device}", Qt.ItemDataRole.ToolTipRole)
-            self.port_combo.setToolTip(f"Connected to {device}")
-            self._log(f"CrankBoy {version} detected on {device}")
-            self.port_combo.setEnabled(True)
-            self._update_transfer_button_state()
-            return
-
-        # Handle already connected (no change)
-        if is_connected:
-            # Verify it's still the same port
-            current_port = self.port_combo.currentData()
-            new_port = result['port']['device'] if result['port'] else None
-            if current_port != new_port:
-                # Port changed, update
-                self.port_combo.clear()
-                port_info = result['port']
-                device = port_info['device']
-                version = port_info['version']
-                label = f"CrankBoy {version}"
-                self.port_combo.addItem(label, device)
-                self.port_combo.setItemData(0, f"Device: {device}", Qt.ItemDataRole.ToolTipRole)
-                self.port_combo.setToolTip(f"Connected to {device}")
-                self._log(f"CrankBoy {version} detected on {device}")
-                self.port_combo.setEnabled(True)
-                self._update_transfer_button_state()
-            return
-
-        # Handle still not connected - update status if changed
-        if not is_connected:
             current_text = self.port_combo.currentText()
-            if result['status'] == 'connected_not_running':
-                if current_text != "CrankBoy not running":
-                    self.port_combo.clear()
-                    self.port_combo.addItem("CrankBoy not running", None)
-                    self.port_combo.setEnabled(False)
-                    self.port_combo.setToolTip("")
-                    self._log(result['message'])
-                    self._update_transfer_button_state()
-            else:
-                if current_text != "Playdate not connected":
-                    self.port_combo.clear()
-                    self.port_combo.addItem("Playdate not connected", None)
-                    self.port_combo.setEnabled(False)
-                    self.port_combo.setToolTip("")
-                    self._log(result['message'])
-                    self._update_transfer_button_state()
+            expected_text = "CrankBoy not running" if result['status'] == 'connected_not_running' else "Playdate not connected"
+
+            if current_text != expected_text:
+                self.port_combo.clear()
+                self.port_combo.addItem(expected_text, None)
+                if not was_connected or was_connected: # Always log if status message changed
+                     self._log(result['message'])
+
+        self._update_transfer_button_state()
 
     def _add_files_dialog(self):
         """Open file dialog to add files."""

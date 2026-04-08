@@ -80,7 +80,7 @@ def is_playdate_device(port):
 
 
 def scan_for_crankboy(should_stop_callback=None):
-    """Scan for CrankBoy and return detailed status.
+    """Scan for all CrankBoy devices and return detailed status.
 
     Args:
         should_stop_callback: Optional callback that returns True if scan should stop
@@ -88,7 +88,7 @@ def scan_for_crankboy(should_stop_callback=None):
     Returns:
         dict with keys:
             - 'status': 'connected_running', 'connected_not_running', or 'not_connected'
-            - 'port': dict with device info if found, None otherwise
+            - 'ports': list of dicts with device info for all responsive devices
             - 'message': Human-readable status message
     """
     global _last_crankboy_port
@@ -102,30 +102,8 @@ def scan_for_crankboy(should_stop_callback=None):
     # Check if any Playdate devices are connected (by VID/PID)
     playdate_ports = [p for p in usb_ports if is_playdate_device(p)]
 
-    # Test cached port first
-    if _last_crankboy_port:
-        # Check if we should stop before testing
-        if should_stop_callback and should_stop_callback():
-            return {
-                'status': 'not_connected',
-                'port': None,
-                'message': "Scan interrupted"
-            }
-
-        is_crankboy, version = test_port(_last_crankboy_port, timeout=1.0, should_stop_callback=should_stop_callback)
-        if is_crankboy:
-            for p in usb_ports:
-                if p.device == _last_crankboy_port:
-                    return {
-                        'status': 'connected_running',
-                        'port': {
-                            'device': p.device,
-                            'description': p.description,
-                            'version': version
-                        },
-                        'message': f"CrankBoy detected on {p.device}"
-                    }
-        _last_crankboy_port = None
+    # Collect all responsive ports
+    responsive_ports = []
 
     # Test all ports for CrankBoy response
     for port in usb_ports:
@@ -133,43 +111,41 @@ def scan_for_crankboy(should_stop_callback=None):
         if should_stop_callback and should_stop_callback():
             return {
                 'status': 'not_connected',
-                'port': None,
+                'ports': [],
                 'message': "Scan interrupted"
             }
 
         is_crankboy, version = test_port(port.device, should_stop_callback=should_stop_callback)
         if is_crankboy:
-            _last_crankboy_port = port.device
-            return {
-                'status': 'connected_running',
-                'port': {
-                    'device': port.device,
-                    'description': port.description,
-                    'version': version
-                },
-                'message': f"CrankBoy detected on {port.device}"
-            }
+            responsive_ports.append({
+                'device': port.device,
+                'description': port.description,
+                'version': version
+            })
+
+    if responsive_ports:
+        # Update cache with the first one found if not already in list
+        if not _last_crankboy_port or _last_crankboy_port not in [p['device'] for p in responsive_ports]:
+            _last_crankboy_port = responsive_ports[0]['device']
+
+        return {
+            'status': 'connected_running',
+            'ports': responsive_ports,
+            'message': f"{len(responsive_ports)} CrankBoy(s) detected"
+        }
 
     # No CrankBoy response - check if Playdate hardware is connected
     if playdate_ports:
         return {
             'status': 'connected_not_running',
-            'port': None,
+            'ports': [],
             'message': "Playdate connected but CrankBoy not running - please start CrankBoy"
         }
 
-    # No USB devices at all
-    if not usb_ports:
-        return {
-            'status': 'not_connected',
-            'port': None,
-            'message': "Playdate not connected - please connect your device"
-        }
-
-    # USB devices present but none are Playdate
+    # No USB devices at all or none are Playdate
     return {
         'status': 'not_connected',
-        'port': None,
+        'ports': [],
         'message': "Playdate not connected - please connect your device"
     }
 
@@ -181,8 +157,9 @@ def find_crankboy_port():
         tuple: (port_name, version) or (None, None) if not found
     """
     result = scan_for_crankboy()
-    if result['status'] == 'connected_running' and result['port']:
-        return result['port']['device'], result['port']['version']
+    if result['status'] == 'connected_running' and result['ports']:
+        # Return the first one found
+        return result['ports'][0]['device'], result['ports'][0]['version']
     return None, None
 
 
@@ -194,8 +171,8 @@ def scan_ports():
               Empty list if no CrankBoy found
     """
     result = scan_for_crankboy()
-    if result['status'] == 'connected_running' and result['port']:
-        return [result['port']]
+    if result['status'] == 'connected_running':
+        return result['ports']
     return []
 
 

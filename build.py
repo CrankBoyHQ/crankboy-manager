@@ -244,13 +244,13 @@ def main():
     """Main build function."""
     current_platform = get_platform()
 
-    print(f"CrankBoy Transfer GUI Builder v{VERSION}")
+    print(f"CrankBoy Manager Builder v{VERSION}")
     print(f"Platform: {current_platform}")
     print("=" * 50)
 
     # Parse arguments
     import argparse
-    parser = argparse.ArgumentParser(description="Build CrankBoy Transfer GUI")
+    parser = argparse.ArgumentParser(description="Build CrankBoy Manager")
     parser.add_argument("--clean", action="store_true", help="Clean build artifacts only")
     parser.add_argument("--install", action="store_true", help="Install requirements")
     parser.add_argument("--all", action="store_true", help="Build for all platforms (requires cross-compilation setup)")

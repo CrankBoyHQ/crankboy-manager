@@ -40,3 +40,11 @@ class Settings:
     def set_window_geometry(self, geometry):
         """Save window geometry."""
         self._settings.setValue("window/geometry", geometry)
+
+    def get_log_visible(self):
+        """Get log visibility setting."""
+        return self._settings.value("window/log_visible", True, type=bool)
+
+    def set_log_visible(self, visible):
+        """Save log visibility setting."""
+        self._settings.setValue("window/log_visible", visible)

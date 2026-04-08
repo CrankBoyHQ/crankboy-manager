@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-CrankBoy Transfer GUI
+CrankBoy Manager
 A cross-platform desktop application for transferring Game Boy ROMs to CrankBoy.
 """
 

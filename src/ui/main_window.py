@@ -113,10 +113,6 @@ class MainWindow(QMainWindow):
         controls_layout.addStretch()
 
         # Options (right-aligned)
-        self.verbose_cb = QCheckBox("Verbose")
-        self.verbose_cb.setChecked(self.settings.get_verbose())
-        controls_layout.addWidget(self.verbose_cb)
-
         self.restart_cb = QCheckBox("Restart")
         self.restart_cb.setChecked(self.settings.get_auto_restart())
         self.restart_cb.setToolTip("Restart CrankBoy after all transfers are completed")
@@ -129,12 +125,35 @@ class MainWindow(QMainWindow):
 
         layout.addWidget(controls)
 
-        # === Status Log ===
-        layout.addWidget(QLabel("Status Log:"))
+        # === Status Log (Collapsible) ===
+        log_header_layout = QHBoxLayout()
+        
+        self.log_toggle_btn = QPushButton("Show Log ▼")
+        self.log_toggle_btn.setFlat(True)
+        self.log_toggle_btn.setStyleSheet("QPushButton { text-align: left; padding: 5px; }")
+        log_header_layout.addWidget(self.log_toggle_btn)
+        
+        # Add stretch to push verbose checkbox to the right
+        log_header_layout.addStretch()
+        
+        # Verbose checkbox (right-aligned, relates to log)
+        self.verbose_cb = QCheckBox("Verbose")
+        self.verbose_cb.setChecked(self.settings.get_verbose())
+        log_header_layout.addWidget(self.verbose_cb)
+        
+        layout.addLayout(log_header_layout)
+
         self.log_view = QTextEdit()
         self.log_view.setReadOnly(True)
         self.log_view.setMinimumHeight(100)
         layout.addWidget(self.log_view)
+
+        # Connect toggle button
+        self.log_toggle_btn.clicked.connect(self._toggle_log_visibility)
+
+        # Restore log visibility from settings (default to hidden per user request)
+        log_visible = getattr(self.settings, 'get_log_visible', lambda: False)()
+        self._set_log_visibility(log_visible)
 
         # === Overall Progress ===
         progress_layout = QHBoxLayout()
@@ -730,6 +749,22 @@ class MainWindow(QMainWindow):
             self.progress_label.setText("1 file")
         else:
             self.progress_label.setText(f"{count} files")
+
+    def _toggle_log_visibility(self):
+        """Toggle the visibility of the log view."""
+        is_visible = self.log_view.isVisible()
+        self._set_log_visibility(not is_visible)
+
+    def _set_log_visibility(self, visible):
+        """Set the visibility of the log view and update button text."""
+        self.log_view.setVisible(visible)
+        if visible:
+            self.log_toggle_btn.setText("Hide Log ▼")
+        else:
+            self.log_toggle_btn.setText("Show Log ▶")
+        # Save to settings
+        if hasattr(self.settings, 'set_log_visible'):
+            self.settings.set_log_visible(visible)
 
     def closeEvent(self, event):
         """Handle window close."""

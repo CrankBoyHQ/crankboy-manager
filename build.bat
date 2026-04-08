@@ -1,7 +1,7 @@
 @echo off
 REM Build script for Windows
 
-echo CrankBoy Transfer GUI Builder
+echo CrankBoy Manager Builder
 echo =============================
 
 if "%1"=="clean" (

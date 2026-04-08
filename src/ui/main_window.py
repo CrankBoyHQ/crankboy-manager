@@ -155,6 +155,7 @@ class MainWindow(QMainWindow):
 
         self.file_list.files_added.connect(self._on_files_added)
         self.file_list.itemSelectionChanged.connect(self._on_selection_changed)
+        self.file_list.log_message.connect(self._log)
 
     def _set_window_icon(self):
         """Set the window icon from the bundled icon file."""
@@ -278,7 +279,7 @@ class MainWindow(QMainWindow):
             self,
             "Select ROM Files",
             "",
-            "Game Boy ROMs (*.gb *.gbc *.gbz);;All Files (*.*)"
+            "Game Boy ROMs (*.gb *.gbc *.gbz);;ZIP Archives (*.zip);;All Files (*.*)"
         )
         if files:
             self.file_list.add_files(files)

@@ -58,8 +58,9 @@ class MainWindow(QMainWindow):
         # Initial scan
         self._start_port_scan()
 
-        # Update transfer button state
+        # Update button states
         self._update_transfer_button_state()
+        self._update_clear_button_state()
 
     def _setup_ui(self):
         """Setup the user interface."""
@@ -311,6 +312,7 @@ class MainWindow(QMainWindow):
         self._log(f"Added {len(files)} file(s)")
         self._update_progress_label()
         self._update_transfer_button_state()
+        self._update_clear_button_state()
 
         # Start background cover downloads for new files
         self._start_cover_downloads_for_files(files)
@@ -389,6 +391,7 @@ class MainWindow(QMainWindow):
 
         self._update_progress_label()
         self._update_transfer_button_state()
+        self._update_clear_button_state()
 
     def _start_transfer(self):
         """Start the transfer process."""
@@ -570,6 +573,7 @@ class MainWindow(QMainWindow):
         self.file_list.clear_completed()
         self._update_progress_label()
         self._update_transfer_button_state()
+        self._update_clear_button_state()
 
     def _on_file_started(self, filename, total_bytes):
         """Handle file transfer starting."""
@@ -602,6 +606,7 @@ class MainWindow(QMainWindow):
             self.file_list.set_file_status(filepath, FileStatus.DONE if success else FileStatus.FAILED)
             # Mark file progress - green for success, red for failure
             self.file_list.set_file_progress(filepath, 100, 100, is_error=not success)
+            self._update_clear_button_state()
 
         # Add to completed bytes for overall progress
         self._bytes_completed += self._current_file_total
@@ -724,6 +729,7 @@ class MainWindow(QMainWindow):
         self._current_file_index = 0
         self._update_progress_label()
         self._update_transfer_button_state()
+        self._update_clear_button_state()
 
         # Restart auto-refresh timer
         self._scan_timer.start(3000)
@@ -759,6 +765,8 @@ class MainWindow(QMainWindow):
         self.keep_compressed_cb.setEnabled(enabled)
         # Transfer button stays enabled (text changes to Stop/Start)
         self.clear_btn.setEnabled(enabled)
+        if enabled:
+            self._update_clear_button_state()
 
         # Remove button is disabled during transfer
         self.remove_btn.setEnabled(False)
@@ -800,6 +808,21 @@ class MainWindow(QMainWindow):
 
         has_files = self._has_transferable_files()
         self.transfer_btn.setEnabled(self._crankboy_connected and has_files)
+
+    def _update_clear_button_state(self):
+        """Update the enabled state of the clear button."""
+        # If a transfer is running, it stays disabled
+        if self.worker and self.worker.isRunning():
+            self.clear_btn.setEnabled(False)
+            return
+
+        has_done = False
+        for row in range(self.file_list.rowCount()):
+            status_item = self.file_list.item(row, 4)
+            if status_item and status_item.data(Qt.ItemDataRole.UserRole) == FileStatus.DONE:
+                has_done = True
+                break
+        self.clear_btn.setEnabled(has_done)
 
     def _toggle_log_visibility(self):
         """Toggle the visibility of the log view."""

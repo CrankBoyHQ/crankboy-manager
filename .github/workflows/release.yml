@@ -16,7 +16,7 @@ jobs:
       - name: Set up Python 3.12
         uses: actions/setup-python@v6
         with:
-          python-version: '3.12'
+          python-version: "3.12"
 
       - name: Install Dependencies
         run: |
@@ -57,7 +57,7 @@ jobs:
       - name: Set up Python 3.12
         uses: actions/setup-python@v6
         with:
-          python-version: '3.12'
+          python-version: "3.12"
 
       - name: Install Dependencies
         run: |
@@ -87,10 +87,10 @@ jobs:
           CERT_SHA1="${{ secrets.MACOS_CERTIFICATE_SHA1 }}"
           APP_PATH="dist/CrankBoy Manager.app"
           MAIN_BINARY="$APP_PATH/Contents/MacOS/CrankBoy Manager"
-          
+
           find "$APP_PATH" -type f -exec codesign --remove-signature {} \; 2>/dev/null || true
           codesign --remove-signature "$APP_PATH" 2>/dev/null || true
-          
+
           find "$APP_PATH" -type f -exec sh -c 'file "$1" | grep -q "Mach-O"' _ {} \; -print | \
             awk -F/ '{print NF, $0}' | sort -rn | cut -d' ' -f2- | \
             while IFS= read -r file; do
@@ -98,11 +98,11 @@ jobs:
                 codesign --force --timestamp --options runtime --sign "$CERT_SHA1" "$file"
               fi
             done
-          
+
           if [ -f "$MAIN_BINARY" ]; then
             codesign --force --timestamp --options runtime --entitlements entitlements.plist --sign "$CERT_SHA1" "$MAIN_BINARY"
           fi
-          
+
           codesign --force --timestamp --options runtime --entitlements entitlements.plist --sign "$CERT_SHA1" "$APP_PATH"
           codesign --verify --verbose --deep --strict "$APP_PATH"
 
@@ -119,7 +119,7 @@ jobs:
             --team-id "${{ secrets.MACOS_NOTARIZATION_TEAM_ID }}" \
             --password "${{ secrets.MACOS_NOTARIZATION_PASSWORD }}" \
             --wait 2>&1 | tee notary_output.txt
-          
+
           if grep -q "status: Invalid" notary_output.txt; then
             echo "ERROR: Notarization failed"
             exit 1
@@ -154,7 +154,7 @@ jobs:
       - name: Set up Python 3.12
         uses: actions/setup-python@v6
         with:
-          python-version: '3.12'
+          python-version: "3.12"
 
       - name: Install System Dependencies
         run: |
@@ -213,7 +213,7 @@ jobs:
         id: generate_notes
         run: |
           PREVIOUS_TAG=$(git tag --sort=-v:refname | sed -n '2p')
-          
+
           if [ -n "$PREVIOUS_TAG" ]; then
             echo "Found previous tag: $PREVIOUS_TAG"
             COMPARE_URL="https://github.com/${{ github.repository }}/compare/${PREVIOUS_TAG}...${{ github.ref_name }}"
@@ -222,40 +222,35 @@ jobs:
             FIRST_COMMIT=$(git rev-list --max-parents=0 HEAD)
             COMPARE_URL="https://github.com/${{ github.repository }}/compare/${FIRST_COMMIT}...${{ github.ref_name }}"
           fi
-          
-          echo 'RELEASE_NOTES<<EOF' >> $GITHUB_ENV
+
+          echo "RELEASE_NOTES<<EOF" >> $GITHUB_ENV
           echo "**Full Changelog**: ${COMPARE_URL}" >> $GITHUB_ENV
-          echo '' >> $GITHUB_ENV
-          echo '## Downloads' >> $GITHUB_ENV
-          echo '- Windows: `CrankBoyManager-{version}-windows.zip`' >> $GITHUB_ENV
-          echo '- macOS: `CrankBoyManager-{version}-macos.zip`' >> $GITHUB_ENV
-          echo '- Linux: `CrankBoyManager-{version}-x86_64.AppImage`' >> $GITHUB_ENV
-          echo '' >> $GITHUB_ENV
-          echo '## Installation' >> $GITHUB_ENV
-          echo '- **Windows**: Extract and run `CrankBoyManager.exe`' >> $GITHUB_ENV
-          echo '- **macOS**: Extract and move `CrankBoy Manager.app` to Applications' >> $GITHUB_ENV
-          echo '- **Linux**: Make the AppImage executable and run it' >> $GITHUB_ENV
-          echo 'EOF' >> $GITHUB_ENV
+          echo "" >> $GITHUB_ENV
+          echo "## Installation" >> $GITHUB_ENV
+          echo "- **Windows**: Extract and run \`CrankBoyManager.exe\`" >> $GITHUB_ENV
+          echo "- **macOS**: Extract and move \`CrankBoy Manager.app\` to Applications" >> $GITHUB_ENV
+          echo "- **Linux**: Make the AppImage executable and run it" >> $GITHUB_ENV
+          echo "EOF" >> $GITHUB_ENV
 
       - name: Rename Artifacts with Version
         run: |
           VERSION=${{ github.ref_name }}
           VERSION=${VERSION#v}
-          
+
           mkdir -p release_assets
-          
+
           # Windows
           if [ -f "artifacts/windows-build/CrankBoyManager.exe" ]; then
             cp "artifacts/windows-build/CrankBoyManager.exe" "release_assets/CrankBoyManager-${VERSION}-windows.exe"
             cd release_assets && zip "CrankBoyManager-${VERSION}-windows.zip" "CrankBoyManager-${VERSION}-windows.exe" && cd ..
             rm "release_assets/CrankBoyManager-${VERSION}-windows.exe"
           fi
-          
+
           # macOS
           if [ -f "artifacts/macos-build/CrankBoyManager-${VERSION}-macos.zip" ]; then
             cp "artifacts/macos-build/CrankBoyManager-${VERSION}-macos.zip" "release_assets/"
           fi
-          
+
           # Linux
           if [ -n "$(ls artifacts/linux-build/*.AppImage 2>/dev/null)" ]; then
             cp artifacts/linux-build/*.AppImage "release_assets/CrankBoyManager-${VERSION}-x86_64.AppImage"
@@ -266,7 +261,7 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           VERSION=${{ github.ref_name }}
-          
+
           gh release create ${{ github.ref_name }} \
             --draft \
             --title "Release ${{ github.ref_name }}" \

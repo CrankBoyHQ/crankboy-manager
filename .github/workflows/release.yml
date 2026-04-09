@@ -1,0 +1,274 @@
+name: Release Build
+
+on:
+  push:
+    tags:
+      - "v*.*.*"
+
+jobs:
+  build_windows:
+    name: Build Windows Executable
+    runs-on: windows-latest
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v6
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+
+      - name: Install Dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install pyinstaller pyserial PyQt6
+
+      - name: Build Executable
+        run: |
+          python build.py
+
+      - name: Get Version from Tag
+        id: get_version
+        shell: bash
+        run: |
+          VERSION=${{ github.ref_name }}
+          # Remove 'v' prefix if present
+          VERSION=${VERSION#v}
+          echo "version=${VERSION}" >> $GITHUB_OUTPUT
+
+      - name: Prepare Artifact
+        run: |
+          mkdir artifact_root
+          Copy-Item dist/CrankBoyManager.exe artifact_root/
+
+      - name: Upload Artifact
+        uses: actions/upload-artifact@v6
+        with:
+          name: windows-build
+          path: artifact_root/
+
+  build_macos:
+    name: Build macOS Executable
+    runs-on: macos-latest
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v6
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+
+      - name: Install Dependencies
+        run: |
+          python3 -m pip install --upgrade pip
+          pip3 install pyinstaller pyserial PyQt6
+
+      - name: Build Executable
+        run: |
+          python3 build.py
+
+      - name: Get Version from Tag
+        id: get_version
+        run: |
+          VERSION=${{ github.ref_name }}
+          VERSION=${VERSION#v}
+          echo "version=${VERSION}" >> $GITHUB_OUTPUT
+
+      - name: Import Code Signing Certificates
+        uses: apple-actions/import-codesign-certs@v3
+        with:
+          p12-file-base64: ${{ secrets.MACOS_CERTIFICATE }}
+          p12-password: ${{ secrets.MACOS_CERTIFICATE_PASSWORD }}
+          keychain-password: ${{ secrets.MACOS_KEYCHAIN_PASSWORD }}
+
+      - name: Sign App Bundle
+        run: |
+          CERT_SHA1="${{ secrets.MACOS_CERTIFICATE_SHA1 }}"
+          APP_PATH="dist/CrankBoy Manager.app"
+          MAIN_BINARY="$APP_PATH/Contents/MacOS/CrankBoy Manager"
+          
+          find "$APP_PATH" -type f -exec codesign --remove-signature {} \; 2>/dev/null || true
+          codesign --remove-signature "$APP_PATH" 2>/dev/null || true
+          
+          find "$APP_PATH" -type f -exec sh -c 'file "$1" | grep -q "Mach-O"' _ {} \; -print | \
+            awk -F/ '{print NF, $0}' | sort -rn | cut -d' ' -f2- | \
+            while IFS= read -r file; do
+              if [ "$file" != "$MAIN_BINARY" ]; then
+                codesign --force --timestamp --options runtime --sign "$CERT_SHA1" "$file"
+              fi
+            done
+          
+          if [ -f "$MAIN_BINARY" ]; then
+            codesign --force --timestamp --options runtime --entitlements entitlements.plist --sign "$CERT_SHA1" "$MAIN_BINARY"
+          fi
+          
+          codesign --force --timestamp --options runtime --entitlements entitlements.plist --sign "$CERT_SHA1" "$APP_PATH"
+          codesign --verify --verbose --deep --strict "$APP_PATH"
+
+      - name: Create Signed ZIP
+        run: |
+          cd dist
+          /usr/bin/ditto -c -k --sequesterRsrc --keepParent "CrankBoy Manager.app" "CrankBoyManager-${{ steps.get_version.outputs.version }}-macos.zip"
+
+      - name: Notarize App
+        id: notarize
+        run: |
+          xcrun notarytool submit "dist/CrankBoyManager-${{ steps.get_version.outputs.version }}-macos.zip" \
+            --apple-id "${{ secrets.MACOS_NOTARIZATION_APPLE_ID }}" \
+            --team-id "${{ secrets.MACOS_NOTARIZATION_TEAM_ID }}" \
+            --password "${{ secrets.MACOS_NOTARIZATION_PASSWORD }}" \
+            --wait 2>&1 | tee notary_output.txt
+          
+          if grep -q "status: Invalid" notary_output.txt; then
+            echo "ERROR: Notarization failed"
+            exit 1
+          fi
+
+      - name: Staple Notarization Ticket
+        run: |
+          xcrun stapler staple "dist/CrankBoy Manager.app"
+          xcrun stapler validate "dist/CrankBoy Manager.app"
+
+      - name: Prepare Artifact
+        run: |
+          mkdir -p artifact_root
+          cd dist
+          rm -f "CrankBoyManager-${{ steps.get_version.outputs.version }}-macos.zip"
+          /usr/bin/ditto -c -k --sequesterRsrc --keepParent "CrankBoy Manager.app" "CrankBoyManager-${{ steps.get_version.outputs.version }}-macos.zip"
+          mv "CrankBoyManager-${{ steps.get_version.outputs.version }}-macos.zip" ../artifact_root/
+
+      - name: Upload Artifact
+        uses: actions/upload-artifact@v6
+        with:
+          name: macos-build
+          path: artifact_root/
+
+  build_linux:
+    name: Build Linux Executable
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v6
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+
+      - name: Install System Dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libxcb-cursor0 libxcb-xinerama0 libxcb-icccm4 libxcb-image0 \
+            libxcb-keysyms1 libxcb-render-util0 libxcb-shape0 libxcb-util1 \
+            libxcb-xkb1 libxcb-glx0 libxcb-randr0 libxkbcommon-x11-0 libdbus-1-3
+
+      - name: Install Dependencies
+        run: |
+          python3 -m pip install --upgrade pip
+          pip3 install pyinstaller pyserial PyQt6
+
+      - name: Build Executable
+        run: |
+          python3 build.py
+
+      - name: Get Version from Tag
+        id: get_version
+        run: |
+          VERSION=${{ github.ref_name }}
+          VERSION=${VERSION#v}
+          echo "version=${VERSION}" >> $GITHUB_OUTPUT
+
+      - name: Prepare Artifact
+        run: |
+          mkdir -p artifact_root
+          cp dist/*.AppImage artifact_root/
+
+      - name: Upload Artifact
+        uses: actions/upload-artifact@v6
+        with:
+          name: linux-build
+          path: artifact_root/
+
+  release:
+    name: Create Draft Release and Upload Assets
+    runs-on: ubuntu-latest
+    needs: [build_windows, build_macos, build_linux]
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Download all build artifacts
+        uses: actions/download-artifact@v7
+        with:
+          path: artifacts
+
+      - name: Generate Release Notes
+        id: generate_notes
+        run: |
+          PREVIOUS_TAG=$(git tag --sort=-v:refname | sed -n '2p')
+          
+          if [ -n "$PREVIOUS_TAG" ]; then
+            echo "Found previous tag: $PREVIOUS_TAG"
+            COMPARE_URL="https://github.com/${{ github.repository }}/compare/${PREVIOUS_TAG}...${{ github.ref_name }}"
+          else
+            echo "No previous tag found."
+            FIRST_COMMIT=$(git rev-list --max-parents=0 HEAD)
+            COMPARE_URL="https://github.com/${{ github.repository }}/compare/${FIRST_COMMIT}...${{ github.ref_name }}"
+          fi
+          
+          echo 'RELEASE_NOTES<<EOF' >> $GITHUB_ENV
+          echo "**Full Changelog**: ${COMPARE_URL}" >> $GITHUB_ENV
+          echo '' >> $GITHUB_ENV
+          echo '## Downloads' >> $GITHUB_ENV
+          echo '- Windows: `CrankBoyManager-{version}-windows.zip`' >> $GITHUB_ENV
+          echo '- macOS: `CrankBoyManager-{version}-macos.zip`' >> $GITHUB_ENV
+          echo '- Linux: `CrankBoyManager-{version}-x86_64.AppImage`' >> $GITHUB_ENV
+          echo '' >> $GITHUB_ENV
+          echo '## Installation' >> $GITHUB_ENV
+          echo '- **Windows**: Extract and run `CrankBoyManager.exe`' >> $GITHUB_ENV
+          echo '- **macOS**: Extract and move `CrankBoy Manager.app` to Applications' >> $GITHUB_ENV
+          echo '- **Linux**: Make the AppImage executable and run it' >> $GITHUB_ENV
+          echo 'EOF' >> $GITHUB_ENV
+
+      - name: Rename Artifacts with Version
+        run: |
+          VERSION=${{ github.ref_name }}
+          VERSION=${VERSION#v}
+          
+          mkdir -p release_assets
+          
+          # Windows
+          if [ -f "artifacts/windows-build/CrankBoyManager.exe" ]; then
+            cp "artifacts/windows-build/CrankBoyManager.exe" "release_assets/CrankBoyManager-${VERSION}-windows.exe"
+            cd release_assets && zip "CrankBoyManager-${VERSION}-windows.zip" "CrankBoyManager-${VERSION}-windows.exe" && cd ..
+            rm "release_assets/CrankBoyManager-${VERSION}-windows.exe"
+          fi
+          
+          # macOS
+          if [ -f "artifacts/macos-build/CrankBoyManager-${VERSION}-macos.zip" ]; then
+            cp "artifacts/macos-build/CrankBoyManager-${VERSION}-macos.zip" "release_assets/"
+          fi
+          
+          # Linux
+          if [ -n "$(ls artifacts/linux-build/*.AppImage 2>/dev/null)" ]; then
+            cp artifacts/linux-build/*.AppImage "release_assets/CrankBoyManager-${VERSION}-x86_64.AppImage"
+          fi
+
+      - name: Create Draft Release
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          VERSION=${{ github.ref_name }}
+          
+          gh release create ${{ github.ref_name }} \
+            --draft \
+            --title "Release ${{ github.ref_name }}" \
+            --notes "${{ env.RELEASE_NOTES }}" \
+            release_assets/*

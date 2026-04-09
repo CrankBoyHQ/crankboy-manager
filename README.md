@@ -112,14 +112,6 @@ After building, you'll find:
 - **macOS:** `dist/CrankBoy Manager.app` + `dist/CrankBoyManager-1.0.0-macos.zip`
 - **Linux:** `dist/crankboy-manager` + `dist/CrankBoyManager-1.0.0-linux.tar.gz`
 
-### Distribution
-
-The ZIP/tar.gz archives are ready for distribution. Users can:
-
-1. Download the appropriate archive for their platform
-2. Extract it
-3. Run the executable (no Python installation required)
-
 ## Protocol
 
 This GUI uses the `ft` (File Transfer) protocol:
@@ -130,7 +122,3 @@ This GUI uses the `ft` (File Transfer) protocol:
 - Detailed error reporting
 
 See the main CrankBoy repository for protocol documentation.
-
-## License
-
-Same as CrankBoy project

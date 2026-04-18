@@ -6,9 +6,10 @@ A cross-platform desktop application for managing Game Boy ROMs on CrankBoy via 
 
 - **Drag-and-drop** file transfer - Simply drag ROM files onto the window
 - **Folder support** - Drop a folder to automatically find all ROMs inside
+- **ZIP Archive support** - Automatically extracts and processes ROMs from within .zip files
 - **Automatic compression** - .gb and .gbc files are compressed to GBZ for faster transfer
 - **Automatic cover art download** - Matching cover art is automatically downloaded and transferred with each ROM
-- **Batch transfers** - Queue up to 20 files at once
+- **Batch transfers** - Queue an unlimited number of files to be processed and transferred one by one
 - **Progress tracking** - Visual progress bars for each file and overall transfer
 - **Auto-restart** - Optionally restart CrankBoy after transfer to refresh library
 - **Cross-platform** - Works on Windows, macOS, and Linux
@@ -55,6 +56,7 @@ python main.py
 - `.gb` - Game Boy ROMs (automatically compressed)
 - `.gbc` - Game Boy Color ROMs (automatically compressed)
 - `.gbz` - Pre-compressed GBZ files (transferred as-is)
+- `.zip` - ZIP Archives (ROMs inside are automatically unpacked)
 
 ### Automatic Cover Art Download
 

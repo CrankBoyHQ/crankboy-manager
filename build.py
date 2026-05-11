@@ -60,6 +60,12 @@ def clean_build():
             shutil.rmtree(dir_name)
             print(f"  Removed {dir_name}/")
 
+    # Clean generated version module
+    version_built = Path(__file__).parent / "src" / "_version_built.py"
+    if version_built.exists():
+        version_built.unlink()
+        print(f"  Removed {version_built.name}")
+
     # Clean .pyc files
     for pyc_file in Path(".").rglob("*.pyc"):
         pyc_file.unlink()

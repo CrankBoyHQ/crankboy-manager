@@ -33,6 +33,14 @@ class Settings:
         """Save keep files compressed on device setting."""
         self._settings.setValue("transfer/keep_compressed", keep_compressed)
     
+    def get_download_cover_art(self):
+        """Get download-cover-art setting."""
+        return self._settings.value("transfer/download_cover_art", True, type=bool)
+
+    def set_download_cover_art(self, enabled):
+        """Save download-cover-art setting."""
+        self._settings.setValue("transfer/download_cover_art", enabled)
+
     def get_window_geometry(self):
         """Get window geometry."""
         return self._settings.value("window/geometry")

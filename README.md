@@ -16,9 +16,11 @@ A cross-platform desktop application for managing Game Boy ROMs on CrankBoy via 
 
 ## Installation
 
+You can use `uv` to automatically install the dependencies on first launch (recommended), or install the dependencies manually with `pip` as follows:
+
 ### Requirements
 
-- Python 3.8 or higher
+- Python 3.10 or higher
 - PyQt6
 - pyserial
 
@@ -34,6 +36,12 @@ pip install -r requirements.txt
 
 ```bash
 python main.py
+```
+
+or with `uv`:
+
+```bash
+uv run --python '>=3.10' --with-requirements requirements.txt main.py
 ```
 
 ### Transfer Files

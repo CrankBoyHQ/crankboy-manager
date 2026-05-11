@@ -1,5 +1,8 @@
 """Serial port scanner for detecting CrankBoy devices with ping protocol."""
 
+import errno
+import os
+import sys
 import time
 import serial
 import serial.tools.list_ports
@@ -13,6 +16,45 @@ PLAYDATE_VENDOR_ID = 0x1331
 PLAYDATE_PRODUCT_ID_SERIAL = 0x5740
 
 
+def _is_permission_error(exc):
+    """True if a SerialException/OSError indicates EACCES."""
+    if isinstance(exc, PermissionError):
+        return True
+    cause = getattr(exc, '__cause__', None)
+    if isinstance(cause, PermissionError):
+        return True
+    if getattr(cause, 'errno', None) == errno.EACCES:
+        return True
+    if getattr(exc, 'errno', None) == errno.EACCES:
+        return True
+    return 'permission denied' in str(exc).lower()
+
+
+def _linux_port_group(port_device):
+    """On Linux, return the group name owning the device node, or None."""
+    if sys.platform != 'linux':
+        return None
+    try:
+        import grp
+        gid = os.stat(port_device).st_gid
+        return grp.getgrgid(gid).gr_name
+    except (OSError, KeyError, ImportError):
+        return None
+
+
+def _build_permission_message(port_device):
+    """Build a user-facing message for a Playdate port we cannot open."""
+    lines = [
+        f"Playdate detected on {port_device} but the port cannot be opened.",
+    ]
+    group = _linux_port_group(port_device)
+    if group:
+        lines.append(f'User may need to be added to the group "{group}"')
+        lines.append(f"  sudo usermod -aG {group} $USER")
+        lines.append("then reboot your computer")
+    return "\n".join(lines)
+
+
 def test_port(port_name, timeout=1.5, should_stop_callback=None):
     """Test if a serial port is a responsive CrankBoy device.
 
@@ -22,8 +64,10 @@ def test_port(port_name, timeout=1.5, should_stop_callback=None):
         should_stop_callback: Optional callback that returns True if scan should stop
 
     Returns:
-        tuple: (is_crankboy, version_info)
-            - is_crankboy: True if CrankBoy responded to ping
+        tuple: (status, version_info)
+            - status: 'crankboy' if CrankBoy responded to ping,
+                      'permission_denied' if the port could not be opened,
+                      False otherwise
             - version_info: Version string from response or None
     """
     try:
@@ -46,8 +90,12 @@ def test_port(port_name, timeout=1.5, should_stop_callback=None):
                     # Parse version from response: cb:pong:CrankBoy:v1.0.0
                     parts = response.split(':')
                     version = parts[3] if len(parts) > 3 else "unknown"
-                    return True, version
+                    return 'crankboy', version
             return False, None
+    except (serial.SerialException, OSError) as e:
+        if _is_permission_error(e):
+            return 'permission_denied', None
+        return False, None
     except Exception:
         return False, None
 
@@ -87,8 +135,16 @@ def scan_for_crankboy(should_stop_callback=None):
 
     Returns:
         dict with keys:
-            - 'status': 'connected_running', 'connected_not_running', or 'not_connected'
-            - 'ports': list of dicts with device info for all responsive devices
+            - 'status': 'connected_running', 'connected_not_running',
+                        'not_accessible', or 'not_connected'
+            - 'ports': list of dicts with device info for every detected
+                       Playdate port. Each dict has:
+                         'device'      - serial device path
+                         'description' - description from list_ports
+                         'version'     - CrankBoy version string, or None
+                                         if CrankBoy is not running / unknown
+                         'accessible'  - False if the port could not be
+                                         opened (permission denied)
             - 'message': Human-readable status message
     """
     global _last_crankboy_port
@@ -99,11 +155,20 @@ def scan_for_crankboy(should_stop_callback=None):
     # Filter out Bluetooth devices
     usb_ports = [p for p in all_ports if 'bluetooth' not in p.description.lower()]
 
-    # Check if any Playdate devices are connected (by VID/PID)
-    playdate_ports = [p for p in usb_ports if is_playdate_device(p)]
+    # Seed an entry for every Playdate detected by VID/PID so it appears
+    # in the result even if its port can't be opened or doesn't respond.
+    playdate_info = {}
+    for p in usb_ports:
+        if is_playdate_device(p):
+            playdate_info[p.device] = {
+                'device': p.device,
+                'description': p.description,
+                'version': None,
+                'accessible': True,
+            }
 
-    # Collect all responsive ports
-    responsive_ports = []
+    responsive_count = 0
+    inaccessible_count = 0
 
     # Test all ports for CrankBoy response
     for port in usb_ports:
@@ -115,30 +180,48 @@ def scan_for_crankboy(should_stop_callback=None):
                 'message': "Scan interrupted"
             }
 
-        is_crankboy, version = test_port(port.device, should_stop_callback=should_stop_callback)
-        if is_crankboy:
-            responsive_ports.append({
+        status, version = test_port(port.device, should_stop_callback=should_stop_callback)
+        if status == 'crankboy':
+            # Record even if VID/PID didn't classify it as Playdate
+            entry = playdate_info.setdefault(port.device, {
                 'device': port.device,
                 'description': port.description,
-                'version': version
+                'version': None,
+                'accessible': True,
             })
+            entry['version'] = version
+            responsive_count += 1
+        elif status == 'permission_denied' and port.device in playdate_info:
+            playdate_info[port.device]['accessible'] = False
+            inaccessible_count += 1
 
-    if responsive_ports:
-        # Update cache with the first one found if not already in list
-        if not _last_crankboy_port or _last_crankboy_port not in [p['device'] for p in responsive_ports]:
-            _last_crankboy_port = responsive_ports[0]['device']
+    ports_list = sorted(playdate_info.values(), key=lambda p: p['device'])
+
+    if responsive_count > 0:
+        responsive_devices = [p['device'] for p in ports_list if p['version']]
+        if not _last_crankboy_port or _last_crankboy_port not in responsive_devices:
+            _last_crankboy_port = responsive_devices[0]
 
         return {
             'status': 'connected_running',
-            'ports': responsive_ports,
-            'message': f"{len(responsive_ports)} CrankBoy(s) detected"
+            'ports': ports_list,
+            'message': "CrankBoy detected" if responsive_count == 1 else f"{responsive_count} CrankBoy(s) detected"
+        }
+
+    # Playdate hardware is present but we couldn't open it
+    if inaccessible_count > 0:
+        first_inaccessible = next(p['device'] for p in ports_list if not p['accessible'])
+        return {
+            'status': 'not_accessible',
+            'ports': ports_list,
+            'message': _build_permission_message(first_inaccessible)
         }
 
     # No CrankBoy response - check if Playdate hardware is connected
-    if playdate_ports:
+    if ports_list:
         return {
             'status': 'connected_not_running',
-            'ports': [],
+            'ports': ports_list,
             'message': "Playdate connected but CrankBoy not running - please start CrankBoy"
         }
 
@@ -146,33 +229,34 @@ def scan_for_crankboy(should_stop_callback=None):
     return {
         'status': 'not_connected',
         'ports': [],
-        'message': "Playdate not connected - please connect your device"
+        'message': "Playdate not connected - please connect and unlock your device"
     }
 
 
 def find_crankboy_port():
     """Find CrankBoy port, testing cached port first.
-    
+
     Returns:
         tuple: (port_name, version) or (None, None) if not found
     """
     result = scan_for_crankboy()
-    if result['status'] == 'connected_running' and result['ports']:
-        # Return the first one found
-        return result['ports'][0]['device'], result['ports'][0]['version']
+    if result['status'] == 'connected_running':
+        for p in result['ports']:
+            if p.get('version'):
+                return p['device'], p['version']
     return None, None
 
 
 def scan_ports():
     """Scan and return only responsive CrankBoy devices.
-    
+
     Returns:
         list: List of dicts with keys 'device', 'description', 'version'
               Empty list if no CrankBoy found
     """
     result = scan_for_crankboy()
     if result['status'] == 'connected_running':
-        return result['ports']
+        return [p for p in result['ports'] if p.get('version')]
     return []
 
 

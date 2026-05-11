@@ -8,15 +8,26 @@ from PyQt6.QtWidgets import (
 from PyQt6.QtCore import Qt, pyqtSignal
 from PyQt6.QtGui import QDragEnterEvent, QDropEvent
 from src.core.transfer_engine import get_file_info_with_crc
-from src.core.constants import FileStatus
+from src.core.constants import FileStatus, ArtStatus, ART_STATUS_LEGEND
+from src.core.database import database as rom_database
 
 
 class FileListWidget(QTableWidget):
     """Table widget with drag-and-drop support for ROM files."""
 
+    # Column indices (kept in one place so callers don't hard-code positions).
+    COL_NAME = 0
+    COL_ORIG_SIZE = 1
+    COL_COMPRESSED = 2
+    COL_RATIO = 3
+    COL_ART = 4
+    COL_STATUS = 5
+    COL_PROGRESS = 6
+
     files_added = pyqtSignal(list)  # List of filepaths
     file_removed = pyqtSignal(str)  # Filepath removed
     log_message = pyqtSignal(str)  # Log messages for ZIP extraction
+    delete_requested = pyqtSignal()  # Delete/Backspace pressed with a selection
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -24,8 +35,10 @@ class FileListWidget(QTableWidget):
         self.filepaths = []  # Ordered list of filepaths
 
         # Setup table
-        self.setColumnCount(6)
-        self.setHorizontalHeaderLabels(["Name", "Original Size", "Compressed", "Ratio", "Status", "Progress"])
+        self.setColumnCount(7)
+        self.setHorizontalHeaderLabels(
+            ["Name", "Original Size", "Compressed", "Ratio", "Art", "Status", "Progress"]
+        )
         self.setSelectionMode(QAbstractItemView.SelectionMode.ExtendedSelection)
         self.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
         self.setDragDropMode(QAbstractItemView.DragDropMode.DropOnly)
@@ -36,22 +49,38 @@ class FileListWidget(QTableWidget):
 
         # Set column resize modes
         header = self.horizontalHeader()
-        header.setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)  # Name stretches
-        header.setSectionResizeMode(1, QHeaderView.ResizeMode.Fixed)    # Original Size fixed
-        header.setSectionResizeMode(2, QHeaderView.ResizeMode.Fixed)    # Compressed fixed
-        header.setSectionResizeMode(3, QHeaderView.ResizeMode.Fixed)    # Ratio fixed
-        header.setSectionResizeMode(4, QHeaderView.ResizeMode.Fixed)    # Status fixed
-        header.setSectionResizeMode(5, QHeaderView.ResizeMode.Fixed)    # Progress fixed
+        header.setSectionResizeMode(self.COL_NAME, QHeaderView.ResizeMode.Stretch)
+        header.setSectionResizeMode(self.COL_ORIG_SIZE, QHeaderView.ResizeMode.Fixed)
+        header.setSectionResizeMode(self.COL_COMPRESSED, QHeaderView.ResizeMode.Fixed)
+        header.setSectionResizeMode(self.COL_RATIO, QHeaderView.ResizeMode.Fixed)
+        header.setSectionResizeMode(self.COL_ART, QHeaderView.ResizeMode.Fixed)
+        header.setSectionResizeMode(self.COL_STATUS, QHeaderView.ResizeMode.Fixed)
+        header.setSectionResizeMode(self.COL_PROGRESS, QHeaderView.ResizeMode.Fixed)
 
         # Set column widths
-        self.setColumnWidth(1, 100)  # Original Size
-        self.setColumnWidth(2, 100)  # Compressed
-        self.setColumnWidth(3, 60)   # Ratio
-        self.setColumnWidth(4, 100)  # Status
-        self.setColumnWidth(5, 100)  # Progress
+        self.setColumnWidth(self.COL_ORIG_SIZE, 100)
+        self.setColumnWidth(self.COL_COMPRESSED, 100)
+        self.setColumnWidth(self.COL_RATIO, 60)
+        self.setColumnWidth(self.COL_ART, 80)
+        self.setColumnWidth(self.COL_STATUS, 100)
+        self.setColumnWidth(self.COL_PROGRESS, 100)
+
+        # Legend tooltip on the Art column header.
+        header_item = self.horizontalHeaderItem(self.COL_ART)
+        if header_item is not None:
+            header_item.setToolTip(ART_STATUS_LEGEND)
 
         # Set minimum width for the table
-        self.setMinimumWidth(700)
+        self.setMinimumWidth(780)
+
+    def keyPressEvent(self, event):
+        """Emit delete_requested on Delete/Backspace when a row is selected."""
+        if event.key() in (Qt.Key.Key_Delete, Qt.Key.Key_Backspace):
+            if self.selectedItems():
+                self.delete_requested.emit()
+                event.accept()
+                return
+        super().keyPressEvent(event)
 
     def dragEnterEvent(self, event: QDragEnterEvent):
         """Accept drag events with URLs."""
@@ -181,7 +210,7 @@ class FileListWidget(QTableWidget):
                 # Name column
                 name_item = QTableWidgetItem(file_info['filename'])
                 name_item.setFlags(name_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
-                self.setItem(row, 0, name_item)
+                self.setItem(row, self.COL_NAME, name_item)
 
                 # Original Size column (right aligned)
                 orig_kb = file_info['original_size'] / 1024
@@ -189,7 +218,7 @@ class FileListWidget(QTableWidget):
                 orig_size_item = QTableWidgetItem(orig_size_text)
                 orig_size_item.setFlags(orig_size_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
                 orig_size_item.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
-                self.setItem(row, 1, orig_size_item)
+                self.setItem(row, self.COL_ORIG_SIZE, orig_size_item)
 
                 # Compressed column (just the size, right aligned)
                 if file_info['is_user_gbz']:
@@ -201,7 +230,7 @@ class FileListWidget(QTableWidget):
                 comp_item = QTableWidgetItem(comp_text)
                 comp_item.setFlags(comp_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
                 comp_item.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
-                self.setItem(row, 2, comp_item)
+                self.setItem(row, self.COL_COMPRESSED, comp_item)
 
                 # Ratio column (just the percentage, centered)
                 if file_info['is_user_gbz']:
@@ -213,14 +242,31 @@ class FileListWidget(QTableWidget):
                 ratio_item = QTableWidgetItem(ratio_text)
                 ratio_item.setFlags(ratio_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
                 ratio_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
-                self.setItem(row, 3, ratio_item)
+                self.setItem(row, self.COL_RATIO, ratio_item)
+
+                # Art column (centered). CRC32 is already computed synchronously
+                # by get_file_info_with_crc, so we can resolve Match/No Match
+                # immediately.
+                crc = file_info.get('original_crc')
+                if crc and rom_database.get_cover_filename(crc):
+                    initial_art = ArtStatus.MATCH
+                elif crc:
+                    initial_art = ArtStatus.NO_MATCH
+                else:
+                    initial_art = ArtStatus.UNKNOWN
+                art_item = QTableWidgetItem(initial_art.value)
+                art_item.setData(Qt.ItemDataRole.UserRole, initial_art)
+                art_item.setFlags(art_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
+                art_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+                art_item.setToolTip(ART_STATUS_LEGEND)
+                self.setItem(row, self.COL_ART, art_item)
 
                 # Status column (centered)
                 status_item = QTableWidgetItem(FileStatus.PENDING.value)
                 status_item.setData(Qt.ItemDataRole.UserRole, FileStatus.PENDING)
                 status_item.setFlags(status_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
                 status_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
-                self.setItem(row, 4, status_item)
+                self.setItem(row, self.COL_STATUS, status_item)
 
                 # Progress column - embed progress bar with % text
                 progress_widget = QWidget()
@@ -245,7 +291,7 @@ class FileListWidget(QTableWidget):
                 """)
                 progress_bar.setAlignment(Qt.AlignmentFlag.AlignCenter)
                 progress_layout.addWidget(progress_bar)
-                self.setCellWidget(row, 5, progress_widget)
+                self.setCellWidget(row, self.COL_PROGRESS, progress_widget)
                 # Store reference to progress bar
                 progress_widget.progress_bar = progress_bar
 
@@ -290,7 +336,7 @@ class FileListWidget(QTableWidget):
         """Remove completed files from the list."""
         to_remove = []
         for row, filepath in enumerate(self.filepaths):
-            status_item = self.item(row, 4)  # Status is column 4
+            status_item = self.item(row, self.COL_STATUS)
             if status_item:
                 status = status_item.data(Qt.ItemDataRole.UserRole)
                 if status == FileStatus.DONE:
@@ -310,7 +356,7 @@ class FileListWidget(QTableWidget):
 
         try:
             row = self.filepaths.index(filepath)
-            progress_widget = self.cellWidget(row, 5)  # Progress is now column 5
+            progress_widget = self.cellWidget(row, self.COL_PROGRESS)
             if progress_widget and hasattr(progress_widget, 'progress_bar'):
                 progress = int((bytes_sent / total_bytes) * 100)
                 progress_bar = progress_widget.progress_bar
@@ -363,13 +409,40 @@ class FileListWidget(QTableWidget):
 
         try:
             row = self.filepaths.index(filepath)
-            status_item = self.item(row, 4)  # Status is now column 4
+            status_item = self.item(row, self.COL_STATUS)
             if status_item:
                 status_item.setText(status.value)
                 status_item.setData(Qt.ItemDataRole.UserRole, status)
                 # Qt automatically handles text color for dark/light mode
         except ValueError:
             pass
+
+    def set_art_status(self, filepath, status: ArtStatus):
+        """Update cover-art status for a file."""
+        if filepath not in self.files_info:
+            return
+
+        try:
+            row = self.filepaths.index(filepath)
+            art_item = self.item(row, self.COL_ART)
+            if art_item:
+                art_item.setText(status.value)
+                art_item.setData(Qt.ItemDataRole.UserRole, status)
+        except ValueError:
+            pass
+
+    def get_art_status(self, filepath):
+        """Return the current ArtStatus for a file, or None if unknown."""
+        if filepath not in self.files_info:
+            return None
+        try:
+            row = self.filepaths.index(filepath)
+            art_item = self.item(row, self.COL_ART)
+            if art_item:
+                return art_item.data(Qt.ItemDataRole.UserRole)
+        except ValueError:
+            pass
+        return None
 
     def mark_transferring(self, filepath):
         """Mark a file as currently transferring."""

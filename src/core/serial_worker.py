@@ -49,6 +49,7 @@ class SerialWorker(QThread):
         self.verbose = self.options.get('verbose', False)
         self.restart = self.options.get('restart', False)
         self.use_sft = self.options.get('use_sft', False)
+        self.download_cover_art = self.options.get('download_cover_art', True)
     
     def _log(self, message):
         """Log message only if verbose mode is enabled."""
@@ -78,7 +79,7 @@ class SerialWorker(QThread):
 
                 filename = file_info['filename']
                 rom_size = file_info['gbz_size']
-                cover_data = file_info.get('cover_data')
+                cover_data = file_info.get('cover_data') if self.download_cover_art else None
                 cover_size = len(cover_data) if cover_data else 0
                 combined_total = rom_size + cover_size
 

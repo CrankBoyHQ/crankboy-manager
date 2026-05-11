@@ -9,7 +9,7 @@ from PyQt6.QtWidgets import (
     QFileDialog, QProgressBar, QTextEdit, QMessageBox,
     QFrame, QGroupBox, QApplication
 )
-from PyQt6.QtCore import Qt, QTimer
+from PyQt6.QtCore import Qt, QTimer, QPropertyAnimation, QAbstractAnimation
 from PyQt6.QtGui import QFont, QIcon
 
 from src.ui.file_list_widget import FileListWidget
@@ -18,7 +18,7 @@ from src.core.port_scanner import scan_for_crankboy
 from src.core.port_scanner_worker import PortScannerWorker
 from src.core.cover_download_worker import CoverDownloadWorker
 from src.core.transfer_engine import send_command, read_response
-from src.core.constants import FileStatus, TransferButtonState
+from src.core.constants import FileStatus, TransferButtonState, ArtStatus, ART_STATUS_LEGEND
 from src.ui.spinner import Spinner
 
 
@@ -32,7 +32,11 @@ class MainWindow(QMainWindow):
         self._cover_download_worker = None
         self._transfer_stopped = False  # Track if transfer was stopped by user
         self._last_stop_time = 0  # Track when user last stopped transfer
-        self._crankboy_connected = False  # Track if CrankBoy is currently connected
+        self._crankboy_connected = False  # Selected port has a running CrankBoy
+        self._port_info = {}  # device path -> port dict from scan_for_crankboy
+        self._last_scan_status = None  # Last scan status, used to dedupe log lines
+        self._current_banner_kind = None  # Banner kind currently displayed
+        self._banner_animation = None  # QPropertyAnimation for fold-up
 
         self.setWindowTitle("CrankBoy Manager")
         self.setMinimumSize(800, 700)
@@ -47,6 +51,11 @@ class MainWindow(QMainWindow):
 
         self._setup_ui()
         self._connect_signals()
+
+        # Single-shot timer that triggers fold-up of the "Connected" banner.
+        self._banner_hide_timer = QTimer(self)
+        self._banner_hide_timer.setSingleShot(True)
+        self._banner_hide_timer.timeout.connect(self._start_banner_fold)
 
         # Setup port scanner worker
         self._scanner_worker = PortScannerWorker()
@@ -67,6 +76,12 @@ class MainWindow(QMainWindow):
         # Update button states
         self._update_transfer_button_state()
         self._update_clear_button_state()
+        self._update_status_banner()
+
+        # Match Art-column visibility to the saved "Download Cover Art" setting.
+        self.file_list.setColumnHidden(
+            self.file_list.COL_ART, not self.download_cover_cb.isChecked()
+        )
 
     def _setup_ui(self):
         """Setup the user interface."""
@@ -75,6 +90,51 @@ class MainWindow(QMainWindow):
         layout = QVBoxLayout(central)
         layout.setSpacing(10)
         layout.setContentsMargins(15, 15, 15, 15)
+
+        # === Top status banner ===
+        self.status_banner = QLabel()
+        self.status_banner.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.status_banner.setVisible(False)
+        layout.addWidget(self.status_banner)
+
+        # === Controls (Settings) ===
+        controls = QGroupBox("Settings")
+        controls_layout = QHBoxLayout(controls)
+
+        # Port selection
+        controls_layout.addWidget(QLabel("Port:"))
+        self.port_combo = QComboBox()
+        # Ensure it sizes based on content
+        self.port_combo.setSizeAdjustPolicy(QComboBox.SizeAdjustPolicy.AdjustToContents)
+        controls_layout.addWidget(self.port_combo)
+
+        # Scanning indicator (circular spinner)
+        self.scan_indicator = Spinner(size=18)
+        self.scan_indicator.hide()
+        controls_layout.addWidget(self.scan_indicator)
+
+
+        # Push options to the right
+        controls_layout.addStretch()
+
+        # Options (right-aligned)
+        self.keep_compressed_cb = QCheckBox("Compress ROMs")
+        self.keep_compressed_cb.setChecked(self.settings.get_keep_compressed())
+        self.keep_compressed_cb.setToolTip("Store ROMs in compressed .gbz format on device")
+        controls_layout.addWidget(self.keep_compressed_cb)
+
+
+        self.restart_cb = QCheckBox("Restart After")
+        self.restart_cb.setChecked(self.settings.get_auto_restart())
+        self.restart_cb.setToolTip("Restart CrankBoy after all transfers are completed (allows the new games to be detected)")
+        controls_layout.addWidget(self.restart_cb)
+
+        self.download_cover_cb = QCheckBox("Download Cover Art")
+        self.download_cover_cb.setChecked(self.settings.get_download_cover_art())
+        self.download_cover_cb.setToolTip("Download cover art for each ROM and transfer it to the device")
+        controls_layout.addWidget(self.download_cover_cb)
+
+        layout.addWidget(controls)
 
         # === File List (with drag & drop) ===
         list_header = QHBoxLayout()
@@ -107,40 +167,6 @@ class MainWindow(QMainWindow):
         btn_layout.addWidget(self.clear_btn)
 
         layout.addLayout(btn_layout)
-
-        # === Controls (Settings) ===
-        controls = QGroupBox("Settings")
-        controls_layout = QHBoxLayout(controls)
-
-        # Port selection
-        controls_layout.addWidget(QLabel("Port:"))
-        self.port_combo = QComboBox()
-        # Ensure it sizes based on content
-        self.port_combo.setSizeAdjustPolicy(QComboBox.SizeAdjustPolicy.AdjustToContents)
-        controls_layout.addWidget(self.port_combo)
-
-        # Scanning indicator (circular spinner)
-        self.scan_indicator = Spinner(size=18)
-        self.scan_indicator.hide()
-        controls_layout.addWidget(self.scan_indicator)
-
-
-        # Push options to the right
-        controls_layout.addStretch()
-
-        # Options (right-aligned)
-        self.keep_compressed_cb = QCheckBox("GBZ")
-        self.keep_compressed_cb.setChecked(self.settings.get_keep_compressed())
-        self.keep_compressed_cb.setToolTip("Store ROMs in GBZ format on device")
-        controls_layout.addWidget(self.keep_compressed_cb)
-
-
-        self.restart_cb = QCheckBox("Restart")
-        self.restart_cb.setChecked(self.settings.get_auto_restart())
-        self.restart_cb.setToolTip("Restart CrankBoy after all transfers are completed")
-        controls_layout.addWidget(self.restart_cb)
-
-        layout.addWidget(controls)
 
         # === Status Log (Collapsible) ===
         log_header_layout = QHBoxLayout()
@@ -207,6 +233,10 @@ class MainWindow(QMainWindow):
         self.file_list.files_added.connect(self._on_files_added)
         self.file_list.itemSelectionChanged.connect(self._on_selection_changed)
         self.file_list.log_message.connect(self._log)
+        self.file_list.delete_requested.connect(self._on_delete_requested)
+
+        self.port_combo.currentIndexChanged.connect(self._on_port_selection_changed)
+        self.download_cover_cb.toggled.connect(self._on_download_cover_toggled)
 
     def _set_window_icon(self):
         """Set the window icon from the bundled icon file."""
@@ -258,76 +288,187 @@ class MainWindow(QMainWindow):
         if self.worker and self.worker.isRunning():
             return
 
-        # Check if state changed
-        was_connected = self._crankboy_connected
-        is_connected = result['status'] == 'connected_running'
+        status = result['status']
+        ports = result.get('ports', [])
 
-        # Only hide if we actually found something
-        if is_connected:
+        # Hide the scan indicator as soon as we have any Playdate to show.
+        if ports:
             self.scan_indicator.hide()
+
+        # Refresh our per-port info cache for the selection handler and banner.
+        self._port_info = {p['device']: p for p in ports}
 
         # Save current selection to restore it if possible
         current_selection = self.port_combo.currentData()
 
-        # Handle new connection status
-        if is_connected:
-            self._crankboy_connected = True
-            self.port_combo.setEnabled(True)
+        if ports:
+            # Build the desired (device, label) list for the combo.
+            new_items = [(p['device'], self._format_port_label(p)) for p in ports]
 
-            # Update list of ports if it changed
-            new_ports = result['ports']
-
-            # Simple check to see if ports list is different
-            current_ports = []
+            current_items = []
             for i in range(self.port_combo.count()):
                 data = self.port_combo.itemData(i)
                 if data:
-                    current_ports.append(data)
+                    current_items.append((data, self.port_combo.itemText(i)))
 
-            new_port_devices = [p['device'] for p in new_ports]
-
-            if set(current_ports) != set(new_port_devices):
+            if current_items != new_items:
+                # Block signals so rebuilding doesn't fire spurious selection changes.
+                self.port_combo.blockSignals(True)
                 self.port_combo.clear()
-                for i, port in enumerate(new_ports):
-                    device = port['device']
-                    version = port['version']
-                    label = f"CrankBoy {version}"
+                for i, (device, label) in enumerate(new_items):
                     self.port_combo.addItem(label, device)
                     self.port_combo.setItemData(i, f"Device: {device}", Qt.ItemDataRole.ToolTipRole)
 
-                # Restore selection if it still exists
-                index = self.port_combo.findData(current_selection)
-                if index >= 0:
-                    self.port_combo.setCurrentIndex(index)
-                else:
-                    self.port_combo.setCurrentIndex(0)
+                # Restore prior selection if it still exists; otherwise prefer
+                # the first port with a running CrankBoy.
+                index = self.port_combo.findData(current_selection) if current_selection else -1
+                if index < 0:
+                    for i, (device, _label) in enumerate(new_items):
+                        if self._port_info.get(device, {}).get('version'):
+                            index = i
+                            break
+                if index < 0:
+                    index = 0
+                self.port_combo.setCurrentIndex(index)
+                self.port_combo.blockSignals(False)
 
-            # Update main tooltip for current selection
+            self.port_combo.setEnabled(True)
             active_device = self.port_combo.currentData()
             if active_device:
-                self.port_combo.setToolTip(f"Connected to {active_device}")
-
-            if not was_connected:
-                self._log(result['message'])
-
+                self.port_combo.setToolTip(f"Selected port: {active_device}")
         else:
-            # Not connected or not running
-            self._crankboy_connected = False
+            # No Playdate detected at all.
             self.port_combo.setEnabled(False)
             self.port_combo.setToolTip("")
+            expected_text = "Playdate not connected"
 
             current_text = self.port_combo.currentText()
-            expected_text = "CrankBoy not running" if result['status'] == 'connected_not_running' else "Playdate not connected"
-
             if current_text != expected_text:
+                self.port_combo.blockSignals(True)
                 self.port_combo.clear()
                 self.port_combo.addItem(expected_text, None)
-                # Suppress warning if we just stopped a transfer (within last 3 seconds)
-                import time
-                if time.time() - self._last_stop_time > 3:
-                    self._log(result['message'])
+                self.port_combo.blockSignals(False)
+
+        # Update _crankboy_connected based on what's now selected.
+        self._refresh_crankboy_connected()
+        self._update_status_banner()
+
+        # Log the scan message on status transitions, suppressing immediately
+        # after the user stopped a transfer to avoid noisy bursts.
+        if status != self._last_scan_status:
+            if time.time() - self._last_stop_time > 3:
+                self._log(result['message'])
+            self._last_scan_status = status
 
         self._update_transfer_button_state()
+
+    def _format_port_label(self, port):
+        """Return the combo label for a port dict from scan_for_crankboy."""
+        device = port['device']
+        version = port.get('version')
+        if version:
+            return f"{device} (CrankBoy {version})"
+        return device
+
+    def _refresh_crankboy_connected(self):
+        """Recompute _crankboy_connected from the currently selected port."""
+        device = self.port_combo.currentData()
+        info = self._port_info.get(device) if device else None
+        self._crankboy_connected = bool(info and info.get('version'))
+
+    def _on_port_selection_changed(self, _index):
+        """Handle user-driven port selection changes."""
+        self._refresh_crankboy_connected()
+        device = self.port_combo.currentData()
+        if device:
+            self.port_combo.setToolTip(f"Selected port: {device}")
+        self._update_status_banner()
+        self._update_transfer_button_state()
+
+    def _compute_banner_kind(self):
+        """Determine which banner (if any) should be shown."""
+        if not self._port_info:
+            return 'no_playdate'
+        device = self.port_combo.currentData()
+        info = self._port_info.get(device) if device else None
+        if info is None:
+            return None
+        if not info.get('accessible', True):
+            return 'inaccessible'
+        if not info.get('version'):
+            return 'launch'
+        return 'connected'
+
+    _BANNER_STYLES = {
+        'no_playdate': ("Connected and unlock your Playdate", "#ffc500", "black"),
+        'inaccessible': ("Failed to communicate with Playdate. See log.", "#ff0000", "white"),
+        'launch': ("Please launch CrankBoy on your playdate", "#7700ff", "white"),
+        'connected': ("Connected", "#1fc54e", "white"),
+    }
+
+    def _update_status_banner(self):
+        """Update the top-of-window status banner based on current port state."""
+        kind = self._compute_banner_kind()
+        if kind == self._current_banner_kind:
+            # No change. Leave whatever the banner is currently doing
+            # (visible, folded, mid-animation) alone.
+            return
+
+        # Cancel any in-flight fold animation or pending hide timer.
+        self._cancel_banner_animation()
+
+        self._current_banner_kind = kind
+
+        if kind is None:
+            self.status_banner.setVisible(False)
+            return
+
+        text, bg, fg = self._BANNER_STYLES[kind]
+        self._show_status_banner(text, bg, fg)
+
+        if kind == 'connected':
+            # After 3 seconds, fold the banner away.
+            self._banner_hide_timer.start(3000)
+
+    def _show_status_banner(self, text, bg, fg):
+        """Show the status banner with the given text and colors."""
+        # Reset any leftover height constraint from a prior fold animation.
+        self.status_banner.setMaximumHeight(16777215)
+        self.status_banner.setText(text)
+        self.status_banner.setStyleSheet(
+            f"QLabel {{ background-color: {bg}; color: {fg};"
+            f" font-weight: bold; padding: 8px; }}"
+        )
+        self.status_banner.setVisible(True)
+
+    def _cancel_banner_animation(self):
+        """Stop any pending hide timer or fold animation and restore height."""
+        if self._banner_hide_timer.isActive():
+            self._banner_hide_timer.stop()
+        if self._banner_animation is not None:
+            if self._banner_animation.state() == QAbstractAnimation.State.Running:
+                self._banner_animation.stop()
+            self._banner_animation = None
+        self.status_banner.setMaximumHeight(16777215)
+
+    def _start_banner_fold(self):
+        """Animate the banner folding up over 300ms, then hide it."""
+        start_h = self.status_banner.sizeHint().height()
+        if start_h <= 0:
+            self.status_banner.setVisible(False)
+            return
+        self._banner_animation = QPropertyAnimation(self.status_banner, b"maximumHeight")
+        self._banner_animation.setDuration(300)
+        self._banner_animation.setStartValue(start_h)
+        self._banner_animation.setEndValue(0)
+        self._banner_animation.finished.connect(self._on_banner_folded)
+        self._banner_animation.start()
+
+    def _on_banner_folded(self):
+        """Called when the fold animation finishes."""
+        self.status_banner.setVisible(False)
+        self.status_banner.setMaximumHeight(16777215)
+        self._banner_animation = None
 
     def _add_files_dialog(self):
         """Open file dialog to add files."""
@@ -353,6 +494,12 @@ class MainWindow(QMainWindow):
     def _start_cover_downloads_for_files(self, filepaths):
         """Start background cover downloads for the given file paths."""
         if not filepaths:
+            return
+
+        # Honour the user's "Download Cover Art" preference: do not even
+        # attempt downloads when the checkbox is off. The Art column will
+        # still show CRC-based Match/No Match info from when rows were added.
+        if not self.download_cover_cb.isChecked():
             return
 
         # Get references to EXISTING file_info objects from file_list
@@ -393,9 +540,47 @@ class MainWindow(QMainWindow):
         else:
             self._log(f"    Cover not available for {rom_filename}: {message}")
 
+        # Update the Art column for the matching row.
+        filepath = self._find_filepath_by_filename(rom_filename)
+        if filepath is None:
+            return
+        if success:
+            self.file_list.set_art_status(filepath, ArtStatus.OK)
+        else:
+            # "Not in database" comes from the worker when the CRC has no
+            # cover entry. Keep that as No Match rather than Failed.
+            if "Not in database" in (message or ""):
+                self.file_list.set_art_status(filepath, ArtStatus.NO_MATCH)
+            else:
+                self.file_list.set_art_status(filepath, ArtStatus.FAILED)
+
+    def _find_filepath_by_filename(self, rom_filename):
+        """Map a ROM filename (basename) back to its full path in the list."""
+        for filepath, info in self.file_list.files_info.items():
+            if info.get('filename') == rom_filename:
+                return filepath
+        return None
+
     def _on_all_covers_completed(self):
         """Handle all cover downloads completing (queue empty)."""
         self._log("  All cover downloads completed")
+
+    def _on_download_cover_toggled(self, checked):
+        """When the user toggles Download Cover Art, show/hide the Art column
+        and (if enabled) kick off any pending downloads."""
+        self.settings.set_download_cover_art(checked)
+        self.file_list.setColumnHidden(self.file_list.COL_ART, not checked)
+        if not checked:
+            return
+        # Find files that have a database Match but no cover data yet.
+        pending = []
+        for filepath in self.file_list.filepaths:
+            art = self.file_list.get_art_status(filepath)
+            info = self.file_list.files_info.get(filepath)
+            if art == ArtStatus.MATCH and info and info.get('cover_data') is None:
+                pending.append(filepath)
+        if pending:
+            self._start_cover_downloads_for_files(pending)
 
     def _on_selection_changed(self):
         """Handle selection change in file list."""
@@ -403,6 +588,11 @@ class MainWindow(QMainWindow):
         is_transferring = self.worker is not None and self.worker.isRunning()
         has_selection = len(self.file_list.selectedItems()) > 0
         self.remove_btn.setEnabled(has_selection and not is_transferring)
+
+    def _on_delete_requested(self):
+        """Handle Delete/Backspace from the file list — same gating as the button."""
+        if self.remove_btn.isEnabled():
+            self._remove_selected_files()
 
     def _remove_selected_files(self):
         """Remove selected files from the list."""
@@ -430,7 +620,7 @@ class MainWindow(QMainWindow):
         files = []
         for filepath in self.file_list.filepaths:
             row = self.file_list.filepaths.index(filepath)
-            status_item = self.file_list.item(row, 4)  # Status column
+            status_item = self.file_list.item(row, self.file_list.COL_STATUS)  # Status column
             if status_item:
                 status = status_item.data(Qt.ItemDataRole.UserRole)
                 # Only include files that are not done
@@ -511,12 +701,17 @@ class MainWindow(QMainWindow):
         self.settings.set_verbose(self.verbose_cb.isChecked())
         self.settings.set_auto_restart(self.restart_cb.isChecked())
         self.settings.set_keep_compressed(self.keep_compressed_cb.isChecked())
+        self.settings.set_download_cover_art(self.download_cover_cb.isChecked())
 
         # Track overall progress (only for files being transferred)
         self._files_to_transfer = files
         self._current_file_index = 0
-        # Include cover data size in total if present
-        self._total_bytes_all_files = sum(f['gbz_size'] + (len(f['cover_data']) if f.get('cover_data') else 0) for f in files)
+        # Include cover data size in total if present and covers are enabled
+        include_covers = self.download_cover_cb.isChecked()
+        self._total_bytes_all_files = sum(
+            f['gbz_size'] + (len(f['cover_data']) if include_covers and f.get('cover_data') else 0)
+            for f in files
+        )
         self._bytes_completed = 0
         self._current_file_bytes = 0
         self._current_file_total = 0
@@ -524,7 +719,7 @@ class MainWindow(QMainWindow):
         # Count skipped files (those with "Done" status)
         done_count = 0
         for row in range(self.file_list.rowCount()):
-            status_item = self.file_list.item(row, 4)
+            status_item = self.file_list.item(row, self.file_list.COL_STATUS)
             if status_item and status_item.data(Qt.ItemDataRole.UserRole) == FileStatus.DONE:
                 done_count += 1
 
@@ -544,7 +739,8 @@ class MainWindow(QMainWindow):
         options = {
             'verbose': self.verbose_cb.isChecked(),
             'restart': self.restart_cb.isChecked(),
-            'use_sft': True  # We enabled SFT overlay before starting
+            'use_sft': True,  # We enabled SFT overlay before starting
+            'download_cover_art': self.download_cover_cb.isChecked(),
         }
 
         self.worker = SerialWorker(port, files, options)
@@ -594,11 +790,11 @@ class MainWindow(QMainWindow):
         # Mark all non-done files as Pending for resume
         for filepath in self.file_list.filepaths:
             row = self.file_list.filepaths.index(filepath)
-            status_item = self.file_list.item(row, 4)
+            status_item = self.file_list.item(row, self.file_list.COL_STATUS)
             if status_item and status_item.data(Qt.ItemDataRole.UserRole) != FileStatus.DONE:
                 self.file_list.set_file_status(filepath, FileStatus.PENDING)
                 # Reset progress bar to 0
-                progress_widget = self.file_list.cellWidget(row, 5)
+                progress_widget = self.file_list.cellWidget(row, self.file_list.COL_PROGRESS)
                 if progress_widget and hasattr(progress_widget, 'progress_bar'):
                     progress_widget.progress_bar.setValue(0)
         
@@ -775,7 +971,7 @@ class MainWindow(QMainWindow):
     def _get_current_transferring_file(self):
         """Get the filepath of the file currently being transferred."""
         for row, filepath in enumerate(self.file_list.filepaths):
-            status_item = self.file_list.item(row, 4)  # Status is column 4
+            status_item = self.file_list.item(row, self.file_list.COL_STATUS)
             if status_item:
                 status = status_item.data(Qt.ItemDataRole.UserRole)
                 if status == FileStatus.TRANSFERRING:
@@ -790,6 +986,7 @@ class MainWindow(QMainWindow):
         self.verbose_cb.setEnabled(enabled)
         self.restart_cb.setEnabled(enabled)
         self.keep_compressed_cb.setEnabled(enabled)
+        self.download_cover_cb.setEnabled(enabled)
         # Transfer button stays enabled (text changes to Stop/Start)
         self.clear_btn.setEnabled(enabled)
         if enabled:
@@ -819,7 +1016,7 @@ class MainWindow(QMainWindow):
     def _has_transferable_files(self):
         """Check if there are any files in the queue that are not 'Done'."""
         for row in range(self.file_list.rowCount()):
-            status_item = self.file_list.item(row, 4)
+            status_item = self.file_list.item(row, self.file_list.COL_STATUS)
             if status_item:
                 status = status_item.data(Qt.ItemDataRole.UserRole)
                 if status != FileStatus.DONE:
@@ -839,7 +1036,7 @@ class MainWindow(QMainWindow):
     def _has_failed_files(self):
         """Check if there are any failed files in the list."""
         for row in range(self.file_list.rowCount()):
-            status_item = self.file_list.item(row, 4)
+            status_item = self.file_list.item(row, self.file_list.COL_STATUS)
             if status_item and status_item.data(Qt.ItemDataRole.UserRole) == FileStatus.FAILED:
                 return True
         return False
@@ -881,7 +1078,7 @@ class MainWindow(QMainWindow):
 
         has_done = False
         for row in range(self.file_list.rowCount()):
-            status_item = self.file_list.item(row, 4)
+            status_item = self.file_list.item(row, self.file_list.COL_STATUS)
             if status_item and status_item.data(Qt.ItemDataRole.UserRole) == FileStatus.DONE:
                 has_done = True
                 break

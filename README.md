@@ -118,7 +118,7 @@ python build.py --install
 
 After building, you'll find:
 
-- **Windows:** `dist/CrankBoyManager.exe` + `dist/CrankBoyManger-1.0.0-windows.zip`
+- **Windows:** `dist/CrankBoyManager.exe` + `dist/CrankBoyManager-1.0.0-windows.zip`
 - **macOS:** `dist/CrankBoy Manager.app` + `dist/CrankBoyManager-1.0.0-macos.zip`
 - **Linux:** `dist/crankboy-manager` + `dist/CrankBoyManager-1.0.0-linux.tar.gz`
 
@@ -132,3 +132,7 @@ This GUI uses the `ft` (File Transfer) protocol:
 - Detailed error reporting
 
 See the main CrankBoy repository for protocol documentation.
+
+## Acknowledgments
+
+This project was developed with the assistance of LLM coding tools, including **Kimi** and **DeepSeek**. These tools helped in the prototyping of the PyQt6 interface and the implementation of the `ft` protocol.

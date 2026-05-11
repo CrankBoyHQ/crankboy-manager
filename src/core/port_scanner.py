@@ -64,11 +64,15 @@ def test_port(port_name, timeout=1.5, should_stop_callback=None):
         should_stop_callback: Optional callback that returns True if scan should stop
 
     Returns:
-        tuple: (status, version_info)
+        tuple: (status, version_info, scene)
             - status: 'crankboy' if CrankBoy responded to ping,
                       'permission_denied' if the port could not be opened,
                       False otherwise
             - version_info: Version string from response or None
+            - scene: The id of the topmost (current) scene on the device, or
+                     None if it could not be queried. The CrankBoy serial
+                     protocol returns the full chain (root.<...>.current);
+                     we strip everything before the last '.'.
     """
     try:
         with serial.Serial(port_name, 115200, timeout=timeout) as ser:
@@ -83,21 +87,46 @@ def test_port(port_name, timeout=1.5, should_stop_callback=None):
             while time.time() - start_time < timeout:
                 # Check if we should stop
                 if should_stop_callback and should_stop_callback():
-                    return False, None
+                    return False, None, None
 
                 response = read_response(ser, timeout=0.5)
                 if response and response.startswith("cb:pong"):
                     # Parse version from response: cb:pong:CrankBoy:v1.0.0
                     parts = response.split(':')
                     version = parts[3] if len(parts) > 3 else "unknown"
-                    return 'crankboy', version
-            return False, None
+                    scene = _query_current_scene(ser)
+                    return 'crankboy', version, scene
+            return False, None, None
     except (serial.SerialException, OSError) as e:
         if _is_permission_error(e):
-            return 'permission_denied', None
-        return False, None
+            return 'permission_denied', None, None
+        return False, None, None
     except Exception:
-        return False, None
+        return False, None, None
+
+
+def _query_current_scene(ser, timeout=0.6):
+    """Ask the device for its current scene stack and return the top id.
+
+    Response format from CrankBoy: cb:scene:<root>.<...>.<current>
+    On older devices that don't implement cb:scene:get, this returns None.
+    """
+    try:
+        send_command(ser, "cb:scene:get")
+        deadline = time.time() + timeout
+        while time.time() < deadline:
+            response = read_response(ser, timeout=0.25)
+            if not response:
+                continue
+            if not response.startswith("cb:scene:"):
+                continue
+            chain = response[len("cb:scene:"):]
+            if not chain or chain == "unknown":
+                return None
+            return chain.rsplit('.', 1)[-1]
+    except Exception:
+        return None
+    return None
 
 
 def is_playdate_device(port):
@@ -165,6 +194,7 @@ def scan_for_crankboy(should_stop_callback=None):
                 'description': p.description,
                 'version': None,
                 'accessible': True,
+                'scene': None,
             }
 
     responsive_count = 0
@@ -180,7 +210,7 @@ def scan_for_crankboy(should_stop_callback=None):
                 'message': "Scan interrupted"
             }
 
-        status, version = test_port(port.device, should_stop_callback=should_stop_callback)
+        status, version, scene = test_port(port.device, should_stop_callback=should_stop_callback)
         if status == 'crankboy':
             # Record even if VID/PID didn't classify it as Playdate
             entry = playdate_info.setdefault(port.device, {
@@ -188,8 +218,10 @@ def scan_for_crankboy(should_stop_callback=None):
                 'description': port.description,
                 'version': None,
                 'accessible': True,
+                'scene': None,
             })
             entry['version'] = version
+            entry['scene'] = scene
             responsive_count += 1
         elif status == 'permission_denied' and port.device in playdate_info:
             playdate_info[port.device]['accessible'] = False

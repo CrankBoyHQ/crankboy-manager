@@ -20,6 +20,7 @@ from src.core.cover_download_worker import CoverDownloadWorker
 from src.core.transfer_engine import send_command, read_response
 from src.core.constants import FileStatus, TransferButtonState, ArtStatus, ART_STATUS_LEGEND
 from src.ui.spinner import Spinner
+from src.version import VERSION
 
 
 class MainWindow(QMainWindow):
@@ -38,7 +39,7 @@ class MainWindow(QMainWindow):
         self._current_banner_kind = None  # Banner kind currently displayed
         self._banner_animation = None  # QPropertyAnimation for fold-up
 
-        self.setWindowTitle("CrankBoy Manager")
+        self.setWindowTitle(f"CrankBoy Manager {VERSION}")
         self.setMinimumSize(800, 700)
 
         # Set window icon
@@ -371,10 +372,19 @@ class MainWindow(QMainWindow):
         return device
 
     def _refresh_crankboy_connected(self):
-        """Recompute _crankboy_connected from the currently selected port."""
+        """Recompute _crankboy_connected from the currently selected port.
+
+        Transfer is only allowed when the selected port has a running CrankBoy
+        AND the device is not stuck in a scene that prevents file transfer
+        (in-game, settings menu, modal). Scene == None means the device didn't
+        report it (older firmware) — we allow transfer in that case and rely
+        on the pre-flight check in _start_transfer to catch problems.
+        """
         device = self.port_combo.currentData()
         info = self._port_info.get(device) if device else None
-        self._crankboy_connected = bool(info and info.get('version'))
+        has_crankboy = bool(info and info.get('version'))
+        in_blocking_scene = bool(info and self._is_blocking_scene(info.get('scene')))
+        self._crankboy_connected = has_crankboy and not in_blocking_scene
 
     def _on_port_selection_changed(self, _index):
         """Handle user-driven port selection changes."""
@@ -384,6 +394,13 @@ class MainWindow(QMainWindow):
             self.port_combo.setToolTip(f"Selected port: {device}")
         self._update_status_banner()
         self._update_transfer_button_state()
+
+    # Scenes that block ROM transfer: in-game, settings menu, modal dialog.
+    _BLOCKING_SCENES = frozenset({"game", "settings", "modal"})
+
+    def _is_blocking_scene(self, scene):
+        """True if the given scene id means we cannot transfer ROMs."""
+        return scene in self._BLOCKING_SCENES
 
     def _compute_banner_kind(self):
         """Determine which banner (if any) should be shown."""
@@ -397,12 +414,15 @@ class MainWindow(QMainWindow):
             return 'inaccessible'
         if not info.get('version'):
             return 'launch'
+        if self._is_blocking_scene(info.get('scene')):
+            return 'wrong_scene'
         return 'connected'
 
     _BANNER_STYLES = {
-        'no_playdate': ("Connected and unlock your Playdate", "#ffc500", "black"),
+        'no_playdate': ("Connect and unlock your Playdate", "#ffc500", "black"),
         'inaccessible': ("Failed to communicate with Playdate. See log.", "#ff0000", "white"),
         'launch': ("Please launch CrankBoy on your playdate", "#7700ff", "white"),
+        'wrong_scene': ("Return to the Library view to transfer ROMs", "#7700ff", "white"),
         'connected': ("Connected", "#1fc54e", "white"),
     }
 

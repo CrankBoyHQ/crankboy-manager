@@ -156,70 +156,96 @@ def build_macos():
     print(f"[OK] Archive created: dist/{zip_name}")
 
 
-def build_linux():
-    """Build Linux AppImage."""
-    print("\n=== Building Linux AppImage ===")
+def build_linux(flatpak=False):
+    """Build Linux AppImage or for Flatpak"""
+    if flatpak:
+        print("\n=== Building for Flatpak ===")
+        app_id = os.environ.get("FLATPAK_ID")
+        binary_name = "crankboy-manager"
+        appdir = os.environ.get("FLATPAK_DEST")
+    else:
+        print("\n=== Building Linux AppImage ===")
+        app_id = APP_NAME.lower()
+        binary_name = APP_NAME.lower()
+        appdir = f"dist/{APP_NAME}.AppDir"
 
-    # Generate version module with hardcoded version
-    generate_version_module()
+    if not flatpak:
+        # Generate version module with hardcoded version
+        generate_version_module()
 
-    cmd = [
-        "pyinstaller",
-        "--onefile",
-        "--windowed",
-        "--name", APP_NAME.lower(),
-        "--add-data", "src:src",
-        "--add-data", "db:db",
-        "--hidden-import", "serial",
-        "--hidden-import", "serial.tools.list_ports",
-        "--hidden-import", "certifi",
-        "--clean",
-    ]
+        cmd = [
+            "pyinstaller",
+            "--onefile",
+            "--windowed",
+            "--name", APP_NAME.lower(),
+            "--add-data", "src:src",
+            "--add-data", "db:db",
+            "--hidden-import", "serial",
+            "--hidden-import", "serial.tools.list_ports",
+            "--hidden-import", "certifi",
+            "--clean",
+        ]
 
-    if ICON_FILE_LINUX and os.path.exists(ICON_FILE_LINUX):
-        cmd.extend(["--icon", ICON_FILE_LINUX])
+        if ICON_FILE_LINUX and os.path.exists(ICON_FILE_LINUX):
+            cmd.extend(["--icon", ICON_FILE_LINUX])
 
-    cmd.append(MAIN_SCRIPT)
+        cmd.append(MAIN_SCRIPT)
 
-    subprocess.run(cmd, check=True)
+        subprocess.run(cmd, check=True)
 
-    # Create AppDir structure for AppImage
-    appdir = f"dist/{APP_NAME}.AppDir"
-    os.makedirs(appdir, exist_ok=True)
-    os.makedirs(f"{appdir}/usr/bin", exist_ok=True)
+    if flatpak:
+        app_share = f"{appdir}/share/{app_id}"
+        os.makedirs(app_share, exist_ok=True)
+        shutil.copytree("src", f"{app_share}/src")
+        shutil.copy(MAIN_SCRIPT, f"{app_share}/{MAIN_SCRIPT}")
+        shutil.copytree("db", f"{app_share}/db")
+        exec_target = f"python3 {app_share}/{MAIN_SCRIPT}"
+        launcher_path = f"{appdir}/bin/{binary_name}"
+    else:
+        # Create AppDir structure for AppImage
+        os.makedirs(appdir, exist_ok=True)
+        os.makedirs(f"{appdir}/usr/bin", exist_ok=True)
 
-    # Copy executable
-    shutil.copy(f"dist/{APP_NAME.lower()}", f"{appdir}/usr/bin/")
+        # Copy executable
+        shutil.copy(f"dist/{APP_NAME.lower()}", f"{appdir}/usr/bin/")
+        exec_target = f'"${{APPDIR}}/usr/bin/{binary_name}"' # APPDIR is provided by AppImage runtime
+        launcher_path = f"{appdir}/AppRun"
 
     # Create AppRun script
-    # APPDIR is provided by AppImage runtime
-    apprun = """#!/bin/bash
-exec "${{APPDIR}}/usr/bin/{app_name}" "$@"
-""".format(app_name=APP_NAME.lower())
-    with open(f"{appdir}/AppRun", "w") as f:
-        f.write(apprun)
-    os.chmod(f"{appdir}/AppRun", 0o755)
+    with open(launcher_path, "w") as f:
+        f.write(f"""#!/bin/bash
+exec {exec_target} "$@"
+""")
+    os.chmod(launcher_path, 0o755)
 
     # Create desktop entry
+    if flatpak:
+        desktop_dir = f"{appdir}/share/applications"
+        os.makedirs(desktop_dir, exist_ok=True)
+        desktop_path = f"{desktop_dir}/{app_id}.desktop"
+    else:
+        desktop_path = f"{appdir}/{app_id}.desktop"
+
     desktop = f"""[Desktop Entry]
 Name={APP_DISPLAY_NAME}
-Exec={APP_NAME.lower()}
-Icon={APP_NAME.lower()}
+Exec={binary_name}
+Icon={app_id}
 Type=Application
 Categories=Utility;
 Comment=Transfer Game Boy ROMs to CrankBoy
 """
-    with open(f"{appdir}/{APP_NAME.lower()}.desktop", "w") as f:
+    with open(desktop_path, "w") as f:
         f.write(desktop)
 
-    # Create AppStream metadata (for AppImage compliance)
+    # Create AppStream metadata
     os.makedirs(f"{appdir}/usr/share/metainfo", exist_ok=True)
     date_str = datetime.now().strftime("%Y-%m-%d")
     appstream_xml = f"""<?xml version="1.0" encoding="UTF-8"?>
 <component type="desktop-application">
-  <id>crankboymanager</id>
+  <id>{app_id}</id>
   <metadata_license>CC0-1.0</metadata_license>
-  <project_name>{APP_DISPLAY_NAME}</project_name>
+  <project_license>MIT</project_license>
+  <name>{APP_DISPLAY_NAME}</name>
   <summary>Transfer Game Boy ROMs to CrankBoy</summary>
   <description>
     <p>CrankBoy Manager is a desktop application for transferring Game Boy ROMs to your Playdate device running CrankBoy.</p>
@@ -232,33 +258,38 @@ Comment=Transfer Game Boy ROMs to CrankBoy
       <li>Batch transfer multiple ROMs</li>
     </ul>
   </description>
-  <launchable type="desktop-id">{APP_NAME.lower()}.desktop</launchable>
+  <launchable type="desktop-id">{app_id}.desktop</launchable>
   <url type="homepage">https://crankboy.app</url>
+  <url type="vcs-browser">https://github.com/CrankBoyHQ/crankboy-manager</url>
   <developer_name>CrankBoy Dev Team</developer_name>
   <content_rating type="oars-1.1"/>
+  <screenshots>
+    <screenshot type="default">
+      <caption>The main window</caption>
+      <image>https://raw.githubusercontent.com/CrankBoyHQ/crankboy-manager/main/screenshot.png</image>
+    </screenshot>
+  </screenshots>
   <releases>
-    <release version="{VERSION}" date="{date_str}">
-      <description>
-        <p>Initial release</p>
-      </description>
-    </release>
+    <release version="{VERSION}" date="{date_str}"/>
   </releases>
 </component>
 """
-    with open(f"{appdir}/usr/share/metainfo/{APP_NAME.lower()}.appdata.xml", "w") as f:
+    with open(f"{appdir}/usr/share/metainfo/{app_id}.appdata.xml", "w") as f:
         f.write(appstream_xml)
 
-    # Copy the icon file for Linux AppImage
-    icon_filename = f"{APP_NAME.lower()}.png"
-    icon_path = f"{appdir}/{icon_filename}"
+    # Copy the icon file
     if ICON_FILE_LINUX and os.path.exists(ICON_FILE_LINUX):
-        # Copy to root directory (AppImage spec)
-        shutil.copy(ICON_FILE_LINUX, icon_path)
-        
-        # Also copy to system icons directory for desktop integration
-        icon_dir = f"{appdir}/usr/share/icons/hicolor/256x256/apps"
+        icon_dir = f"{appdir}/share/icons/hicolor/256x256/apps" if flatpak \
+            else f"{appdir}/usr/share/icons/hicolor/256x256/apps"
         os.makedirs(icon_dir, exist_ok=True)
-        shutil.copy(ICON_FILE_LINUX, f"{icon_dir}/{icon_filename}")
+        shutil.copy(ICON_FILE_LINUX, f"{icon_dir}/{app_id}.png")
+
+        if not flatpak:
+            # Copy to root directory (AppImage spec)
+            shutil.copy(ICON_FILE_LINUX, f"{appdir}/{app_id}.png")
+    
+    if flatpak:
+        return
 
     # Download and run appimagetool to create the AppImage
     appimage_name = f"{APP_NAME}-{VERSION}-x86_64.AppImage"
@@ -304,6 +335,7 @@ def main():
     parser.add_argument("--clean", action="store_true", help="Clean build artifacts only")
     parser.add_argument("--install", action="store_true", help="Install requirements")
     parser.add_argument("--all", action="store_true", help="Build for all platforms (requires cross-compilation setup)")
+    parser.add_argument("--flatpak", action="store_true", help="Build for Flatpak")
     args = parser.parse_args()
 
     if args.clean:
@@ -325,7 +357,7 @@ def main():
         elif current_platform == "macos":
             build_macos()
         elif current_platform == "linux":
-            build_linux()
+            build_linux(args.flatpak)
         else:
             print(f"Unsupported platform: {current_platform}")
             sys.exit(1)

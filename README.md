@@ -99,6 +99,16 @@ chmod +x build.sh
 ./build.sh
 ```
 
+#### Linux (Flatpak)
+
+```bash
+flatpak_pip_generator --requirements-file=requirements-flatpak.txt
+flatpak run --command=flathub-build org.flatpak.Builder --install io.github.crankboyhq.crankboy-manager.json
+flatpak run --command=flatpak-builder-lint org.flatpak.Builder manifest io.github.crankboyhq.crankboy-manager.json
+flatpak run --command=flatpak-builder-lint org.flatpak.Builder repo repo
+flatpak run io.github.crankboyhq.crankboy-manager
+```
+
 ### Advanced Build Options
 
 #### Python Build Script

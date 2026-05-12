@@ -238,7 +238,8 @@ Comment=Transfer Game Boy ROMs to CrankBoy
         f.write(desktop)
 
     # Create AppStream metadata
-    os.makedirs(f"{appdir}/usr/share/metainfo", exist_ok=True)
+    metainfo_dir = f"{appdir}/share/metainfo" if flatpak else f"{appdir}/usr/share/metainfo"
+    os.makedirs(metainfo_dir, exist_ok=True)
     date_str = datetime.now().strftime("%Y-%m-%d")
     appstream_xml = f"""<?xml version="1.0" encoding="UTF-8"?>
 <component type="desktop-application">
@@ -274,7 +275,7 @@ Comment=Transfer Game Boy ROMs to CrankBoy
   </releases>
 </component>
 """
-    with open(f"{appdir}/usr/share/metainfo/{app_id}.appdata.xml", "w") as f:
+    with open(f"{metainfo_dir}/{app_id}.appdata.xml", "w") as f:
         f.write(appstream_xml)
 
     # Copy the icon file

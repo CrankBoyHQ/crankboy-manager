@@ -102,7 +102,7 @@ chmod +x build.sh
 #### Linux (Flatpak)
 
 ```bash
-flatpak_pip_generator --requirements-file=requirements-flatpak.txt
+flatpak run --command=flatpak-pip-generator org.flatpak.Builder --requirements-file=requirements-flatpak.txt
 flatpak run --command=flathub-build org.flatpak.Builder --install io.github.crankboyhq.crankboy-manager.json
 flatpak run --command=flatpak-builder-lint org.flatpak.Builder manifest io.github.crankboyhq.crankboy-manager.json
 flatpak run --command=flatpak-builder-lint org.flatpak.Builder repo repo

@@ -212,6 +212,10 @@ jobs:
       - name: Checkout Repository
         uses: actions/checkout@v6
 
+      - name: Lint Flatpak Manifest
+        continue-on-error: true
+        run: flatpak-builder-lint manifest io.github.crankboyhq.crankboy-manager.json
+
       - name: Build Flatpak and upload output
         uses: flatpak/flatpak-github-actions/flatpak-builder@v6
         with:
@@ -219,6 +223,10 @@ jobs:
           manifest-path: io.github.crankboyhq.crankboy-manager.json
           cache-key: flatpak-builder-${{ github.sha }}
           arch: ${{ matrix.target.arch }}
+
+      - name: Lint Flatpak Repo
+        continue-on-error: true
+        run: flatpak-builder-lint repo repo
 
   release:
     name: Create Draft Release and Upload Assets

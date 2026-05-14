@@ -1,0 +1,32 @@
+{
+  "id": "io.github.crankboyhq.crankboy-manager",
+  "runtime": "org.kde.Platform",
+  "runtime-version": "6.10",
+  "sdk": "org.kde.Sdk",
+  "base": "com.riverbankcomputing.PyQt.BaseApp",
+  "base-version": "6.10",
+  "cleanup-commands": ["/app/cleanup-BaseApp.sh"],
+  "command": "crankboy-manager",
+  "finish-args": [
+    "--socket=wayland",
+    "--socket=fallback-x11",
+    "--share=ipc",
+    "--device=dri",
+    "--share=network",
+    "--device=all"
+  ],
+  "build-options": {
+    "env": ["BASEAPP_REMOVE_WEBENGINE=1"]
+  },
+  "modules": [
+    "python3-requirements-flatpak.json",
+    {
+      "name": "crankboy-manager",
+      "buildsystem": "simple",
+      "build-commands": [
+        "python3 build.py --flatpak"
+      ],
+      "sources": [{ "type": "dir", "path": "." }]
+    }
+  ]
+}

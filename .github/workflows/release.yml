@@ -191,10 +191,39 @@ jobs:
           name: linux-build
           path: artifact_root/
 
+  build_flatpak:
+    name: Build Flatpak (${{ matrix.target.arch }})
+    runs-on: ${{ matrix.target.runner }}
+    permissions:
+      contents: read
+    container:
+      image: ghcr.io/flathub-infra/flatpak-github-actions:kde-6.10
+      options: --privileged
+    strategy:
+      matrix:
+        target:
+          - id: flatpak-x86_64
+            arch: x86_64
+            runner: ubuntu-24.04
+          - id: flatpak-aarch64
+            arch: aarch64
+            runner: ubuntu-24.04-arm
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v6
+
+      - name: Build Flatpak and upload output
+        uses: flatpak/flatpak-github-actions/flatpak-builder@v6
+        with:
+          bundle: io.github.crankboyhq.crankboy-manager.flatpak
+          manifest-path: io.github.crankboyhq.crankboy-manager.json
+          cache-key: flatpak-builder-${{ github.sha }}
+          arch: ${{ matrix.target.arch }}
+
   release:
     name: Create Draft Release and Upload Assets
     runs-on: ubuntu-latest
-    needs: [build_windows, build_macos, build_linux]
+    needs: [build_windows, build_macos, build_linux, build_flatpak]
     permissions:
       contents: write
 
@@ -255,6 +284,14 @@ jobs:
           if [ -n "$(ls artifacts/linux-build/*.AppImage 2>/dev/null)" ]; then
             cp artifacts/linux-build/*.AppImage "release_assets/CrankBoyManager-${VERSION}-x86_64.AppImage"
           fi
+
+          # Flatpak
+          for arch in x86_64 aarch64; do
+            src="artifacts/io.github.crankboyhq.crankboy-manager-${arch}.flatpak/io.github.crankboyhq.crankboy-manager.flatpak"
+            if [ -f "$src" ]; then
+              cp "$src" "release_assets/CrankBoyManager-${VERSION}-${arch}.flatpak"
+            fi
+          done
 
       - name: Create Draft Release
         env:

@@ -213,6 +213,37 @@ jobs:
                   name: ${{ steps.artifact_details.outputs.artifact_name }}
                   path: artifact_root/
 
+    build_flatpak:
+        name: Build Flatpak (${{ matrix.target.arch }})
+        needs: check_for_commits
+        if: needs.check_for_commits.outputs.has_new_commits == 'true'
+        runs-on: ${{ matrix.target.runner }}
+        permissions:
+            contents: read
+        container:
+            image: ghcr.io/flathub-infra/flatpak-github-actions:kde-6.10
+            options: --privileged
+        strategy:
+            matrix:
+                target:
+                    - id: flatpak-x86_64
+                      arch: x86_64
+                      runner: ubuntu-24.04
+                    - id: flatpak-aarch64
+                      arch: aarch64
+                      runner: ubuntu-24.04-arm
+        steps:
+            - name: Checkout Repository
+              uses: actions/checkout@v6
+
+            - name: Build Flatpak and upload output
+              uses: flatpak/flatpak-github-actions/flatpak-builder@v6
+              with:
+                  bundle: io.github.crankboyhq.crankboy-manager.flatpak
+                  manifest-path: io.github.crankboyhq.crankboy-manager.json
+                  cache-key: flatpak-builder-${{ github.sha }}
+                  arch: ${{ matrix.target.arch }}
+
     build_linux:
         name: Build Linux Executable
         needs: check_for_commits

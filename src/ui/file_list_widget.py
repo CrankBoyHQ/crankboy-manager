@@ -6,10 +6,44 @@ from PyQt6.QtWidgets import (
     QPushButton, QHBoxLayout, QWidget, QLabel, QProgressBar, QHeaderView
 )
 from PyQt6.QtCore import Qt, pyqtSignal
+from PyQt6.QtDBus import QDBusConnection, QDBusMessage
 from PyQt6.QtGui import QDragEnterEvent, QDropEvent
 from src.core.transfer_engine import get_file_info_with_crc
 from src.core.constants import FileStatus, ArtStatus, ART_STATUS_LEGEND
 from src.core.database import database as rom_database
+
+
+PORTAL_FILETRANSFER_MIME = "application/vnd.portal.filetransfer"
+
+
+def _retrieve_portal_files(key: str):
+    """Call org.freedesktop.portal.FileTransfer.RetrieveFiles to resolve a
+    drag-and-drop key into sandbox-accessible file paths. Returns a list of
+    paths, or None if the call fails.
+
+    Implemented based on https://flatpak.github.io/xdg-desktop-portal/docs/doc-org.freedesktop.portal.FileTransfer.html
+    
+    On platforms other than Linux or if no D-Bus API is available, we return None
+    
+    TODO: Replace this with the equivalent Qt library call once
+    https://qt-project.atlassian.net/browse/QTBUG-91357 is resolved"""
+    bus = QDBusConnection.sessionBus()
+    if not bus.isConnected():
+        return None
+    msg = QDBusMessage.createMethodCall(
+        "org.freedesktop.portal.Documents",
+        "/org/freedesktop/portal/documents",
+        "org.freedesktop.portal.FileTransfer",
+        "RetrieveFiles",
+    )
+    msg.setArguments([key, {}])
+    reply = bus.call(msg)
+    if reply.type() != QDBusMessage.MessageType.ReplyMessage:
+        return None
+    args = reply.arguments()
+    if not args:
+        return None
+    return list(args[0])
 
 
 class FileListWidget(QTableWidget):
@@ -84,27 +118,40 @@ class FileListWidget(QTableWidget):
 
     def dragEnterEvent(self, event: QDragEnterEvent):
         """Accept drag events with URLs."""
-        if event.mimeData().hasUrls():
+        mime = event.mimeData()
+        if mime.hasUrls() or mime.hasFormat(PORTAL_FILETRANSFER_MIME):
             event.acceptProposedAction()
         else:
             event.ignore()
 
     def dragMoveEvent(self, event):
         """Accept move events during drag."""
-        if event.mimeData().hasUrls():
+        mime = event.mimeData()
+        if mime.hasUrls() or mime.hasFormat(PORTAL_FILETRANSFER_MIME):
             event.acceptProposedAction()
         else:
             event.ignore()
 
     def dropEvent(self, event: QDropEvent):
-        """Handle dropped files and folders."""
-        if not event.mimeData().hasUrls():
+        """Handle dropped files and folders. Prefer FileTransfer portal mime type, fall back to text/uri-list"""
+        mime = event.mimeData()
+        filepaths = []
+
+        if mime.hasFormat(PORTAL_FILETRANSFER_MIME):
+            key = bytes(mime.data(PORTAL_FILETRANSFER_MIME)).decode("utf-8").strip("\x00")
+            portal_paths = _retrieve_portal_files(key)
+            if portal_paths is not None:
+                filepaths = portal_paths
+
+        if not filepaths and mime.hasUrls():
+            filepaths = [url.toLocalFile() for url in mime.urls() if url.toLocalFile()]
+
+        if not filepaths:
             event.ignore()
             return
 
         added_files = []
-        for url in event.mimeData().urls():
-            filepath = url.toLocalFile()
+        for filepath in filepaths:
             if os.path.isdir(filepath):
                 # Scan folder for ROM files
                 added_files.extend(self._scan_folder(filepath))

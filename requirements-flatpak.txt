@@ -1,0 +1,2 @@
+pyserial>=3.5
+certifi>=2024.2.2

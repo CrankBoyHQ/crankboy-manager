@@ -9,15 +9,17 @@ from PyQt6.QtWidgets import (
     QFileDialog, QProgressBar, QTextEdit, QMessageBox,
     QFrame, QGroupBox, QApplication
 )
-from PyQt6.QtCore import Qt, QTimer, QPropertyAnimation, QAbstractAnimation
+from PyQt6.QtCore import Qt, QTimer, QPropertyAnimation, QAbstractAnimation, pyqtSignal
 from PyQt6.QtGui import QFont, QIcon
 
 from src.ui.file_list_widget import FileListWidget
+from src.ui.forwarder_dialog import ForwarderDialog
 from src.core.serial_worker import SerialWorker
+from src.core.forwarder_worker import MIN_CRANKBOY_VERSION
 from src.core.port_scanner import scan_for_crankboy
 from src.core.port_scanner_worker import PortScannerWorker
 from src.core.cover_download_worker import CoverDownloadWorker
-from src.core.transfer_engine import send_command, read_response
+from src.core.transfer_engine import send_command, read_response, version_at_least
 from src.core.constants import FileStatus, TransferButtonState, ArtStatus, ART_STATUS_LEGEND
 from src.ui.spinner import Spinner
 from src.version import VERSION
@@ -25,6 +27,10 @@ from src.version import VERSION
 
 class MainWindow(QMainWindow):
     """Main application window."""
+
+    # Emitted whenever the connection-status banner kind changes.
+    # Payload is (kind, text, bg, fg) or None when no banner should show.
+    connection_changed = pyqtSignal(object)
 
     def __init__(self, settings):
         super().__init__()
@@ -149,6 +155,12 @@ class MainWindow(QMainWindow):
         self.remove_btn.setEnabled(False)  # Disabled until items are selected
         list_header.addWidget(self.remove_btn)
 
+        self.forwarder_btn = QPushButton("Create Forwarder…")
+        self.forwarder_btn.setToolTip(
+            "Open the launcher builder to wrap a ROM in a forwarder .pdx, launchable from the Playdate system menu directly"
+        )
+        list_header.addWidget(self.forwarder_btn)
+
         layout.addLayout(list_header)
 
         self.file_list = FileListWidget()
@@ -229,6 +241,7 @@ class MainWindow(QMainWindow):
         self.add_btn.clicked.connect(self._add_files_dialog)
         self.remove_btn.clicked.connect(self._remove_selected_files)
         self.transfer_btn.clicked.connect(self._on_transfer_button_clicked)
+        self.forwarder_btn.clicked.connect(self._on_create_forwarder_clicked)
         self.clear_btn.clicked.connect(self._clear_completed)
 
         self.file_list.files_added.connect(self._on_files_added)
@@ -395,12 +408,24 @@ class MainWindow(QMainWindow):
         self._update_status_banner()
         self._update_transfer_button_state()
 
-    # Scenes that block ROM transfer: in-game, settings menu, modal dialog.
-    _BLOCKING_SCENES = frozenset({"game", "settings", "modal"})
+    # Scenes the manager can interact with cleanly. Anything else
+    # (in-game, settings, credits, homebrew_hub, parental_lock, ...) is
+    # treated as a "wrong scene" -- both for ROM transfers and for the
+    # forwarder wizard. sft-modal is included so the banner stays
+    # "Connected" during an active file transfer (which the transfer
+    # worker drives the device into via cb:sft:on).
+    _NON_BLOCKING_SCENES = frozenset({"library", "sft-modal"})
 
     def _is_blocking_scene(self, scene):
-        """True if the given scene id means we cannot transfer ROMs."""
-        return scene in self._BLOCKING_SCENES
+        """True if the given scene id means the manager can't interact.
+
+        We allowlist non-blocking scenes; an unknown / None scene from
+        older firmware is treated as non-blocking so that legacy
+        devices remain usable.
+        """
+        if scene is None:
+            return False
+        return scene not in self._NON_BLOCKING_SCENES
 
     def _compute_banner_kind(self):
         """Determine which banner (if any) should be shown."""
@@ -441,6 +466,7 @@ class MainWindow(QMainWindow):
 
         if kind is None:
             self.status_banner.setVisible(False)
+            self.connection_changed.emit(None)
             return
 
         text, bg, fg = self._BANNER_STYLES[kind]
@@ -449,6 +475,26 @@ class MainWindow(QMainWindow):
         if kind == 'connected':
             # After 3 seconds, fold the banner away.
             self._banner_hide_timer.start(3000)
+
+        self.connection_changed.emit((kind, text, bg, fg))
+
+    def current_connection_state(self):
+        """Return (kind, text, bg, fg) for the current banner kind, or
+        None when no banner is active. Used by satellite windows (e.g.
+        the forwarder dialog) to mirror connection status.
+        """
+        kind = self._current_banner_kind
+        if kind is None:
+            return None
+        text, bg, fg = self._BANNER_STYLES[kind]
+        return (kind, text, bg, fg)
+
+    def current_port_info(self):
+        """Return the selected port's info dict, or None."""
+        device = self.port_combo.currentData()
+        if not device:
+            return None
+        return self._port_info.get(device)
 
     def _show_status_banner(self, text, bg, fg):
         """Show the status banner with the given text and colors."""
@@ -830,6 +876,33 @@ class MainWindow(QMainWindow):
             # No transfer running, start one
             self._start_transfer()
 
+    def _on_create_forwarder_clicked(self):
+        """Open the standalone forwarder builder dialog.
+
+        The dialog is openable even with no CrankBoy connected; it
+        mirrors connection status via the connection_changed signal and
+        greys its own "Add to Device" button until the device is ready.
+        """
+        if self.worker and self.worker.isRunning():
+            QMessageBox.warning(
+                self, "Busy", "Wait for the current operation to finish."
+            )
+            return
+
+        dlg = ForwarderDialog(self, log_callback=self._log)
+        dlg.worker_started.connect(self._on_forwarder_dialog_worker_started)
+        dlg.worker_finished.connect(self._on_forwarder_dialog_worker_finished)
+        dlg.show()
+
+    def _on_forwarder_dialog_worker_started(self):
+        """Pause scanning while a forwarder build runs (data-disk mode)."""
+        self._scan_timer.stop()
+
+    def _on_forwarder_dialog_worker_finished(self):
+        """Resume scanning once the forwarder build is done."""
+        if not (self.worker and self.worker.isRunning()):
+            self._scan_timer.start(3000)
+
     def _clear_completed(self):
         """Clear completed files from the list."""
         self.file_list.clear_completed()
@@ -1007,6 +1080,7 @@ class MainWindow(QMainWindow):
         self.restart_cb.setEnabled(enabled)
         self.keep_compressed_cb.setEnabled(enabled)
         self.download_cover_cb.setEnabled(enabled)
+        self.forwarder_btn.setEnabled(enabled)
         # Transfer button stays enabled (text changes to Stop/Start)
         self.clear_btn.setEnabled(enabled)
         if enabled:

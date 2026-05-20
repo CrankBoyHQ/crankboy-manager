@@ -2,3 +2,4 @@ PyQt6>=6.4.0
 PyQt6-Qt6>=6.4.0
 pyserial>=3.5
 certifi>=2024.2.2
+Pillow>=10.0.0

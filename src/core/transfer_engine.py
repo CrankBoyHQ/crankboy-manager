@@ -227,14 +227,19 @@ def send_command(ser, cmd, verbose=False):
     ser.write(full_cmd.encode('utf-8'))
 
 
-def read_response(ser, timeout=SERIAL_TIMEOUT, verbose=False, skip_echo=True):
+def read_response(ser, timeout=SERIAL_TIMEOUT, verbose=False, skip_echo=True,
+                  on_line=None):
     """Read a response line, filtering out non-protocol messages and echoes.
-    
+
     Args:
         ser: Serial connection
         timeout: Maximum time to wait for response
         verbose: Whether to print debug info
         skip_echo: Whether to skip "msg " echo lines (default True)
+        on_line: Optional callback invoked once per accepted protocol
+            line (e.g. "cb:fwdinstall:ok:..."). Receives the decoded
+            line as its only argument. Used by the UI to log raw
+            device responses in a distinct colour.
     """
     import time
     start_time = time.time()
@@ -261,6 +266,11 @@ def read_response(ser, timeout=SERIAL_TIMEOUT, verbose=False, skip_echo=True):
 
             # Check if it's a valid protocol response
             if decoded.startswith(('ft:', 'cb:')):
+                if on_line is not None:
+                    try:
+                        on_line(decoded)
+                    except Exception:
+                        pass
                 return decoded
 
         except Exception:
@@ -273,13 +283,158 @@ def parse_response(response):
     """Parse ft: or cb: protocol response."""
     if not response or not response.startswith(("ft:", "cb:")):
         return None, None, None
-    
+
     parts = response.split(':', 2)
     if len(parts) < 2:
         return None, None, None
-    
+
     proto = parts[0]
     cmd = parts[1]
     params = parts[2] if len(parts) > 2 else ""
-    
+
     return proto, cmd, params
+
+
+# ---- forwarder serial helpers ----
+
+def cb_pdxpath(ser, timeout=2.0, on_line=None):
+    """Ask CrankBoy for its mounted .pdx path.
+
+    Returns the (URL-decoded) path string, or None on error / unsupported.
+    `on_line`, when provided, is invoked once per raw device response line.
+    """
+    send_command(ser, "cb:pdxpath")
+    import time as _t
+    deadline = _t.time() + timeout
+    while _t.time() < deadline:
+        line = read_response(ser, timeout=0.5, on_line=on_line)
+        if not line or not line.startswith("cb:pdxpath:"):
+            continue
+        rest = line[len("cb:pdxpath:"):]
+        if rest.startswith("ok:"):
+            return urllib.parse.unquote(rest[len("ok:"):])
+        if rest.startswith("error:"):
+            return None
+    return None
+
+
+def cb_pdxinfo(ser, timeout=2.0, on_line=None):
+    """Ask CrankBoy for its pdxinfo. Returns a dict of pdxinfo fields,
+    or None if it could not be fetched.
+    """
+    send_command(ser, "cb:pdxinfo")
+    import time as _t
+    deadline = _t.time() + timeout
+    out = {}
+    saw_any = False
+    while _t.time() < deadline:
+        line = read_response(ser, timeout=0.5, on_line=on_line)
+        if not line or not line.startswith("cb:pdxinfo:"):
+            continue
+        rest = line[len("cb:pdxinfo:"):]
+        if rest == "end":
+            return out if saw_any else None
+        if rest.startswith("error:"):
+            return None
+        if rest.startswith("kv:"):
+            payload = rest[len("kv:"):]
+            # payload = <urlenc-key>:<urlenc-value>; key has no ':' after decoding
+            # but the encoded form may also be free of ':' since url_encode escapes it.
+            if ":" not in payload:
+                continue
+            enc_k, enc_v = payload.split(":", 1)
+            k = urllib.parse.unquote(enc_k)
+            v = urllib.parse.unquote(enc_v)
+            out[k] = v
+            saw_any = True
+    return None
+
+
+def send_bitmap(ser, fb_bytes):
+    """Push a Playdate framebuffer (12000 raw bytes) over serial via the
+    `bitmap` command.
+
+    Per playdate-reverse-engineering/usb.md, the payload is the tightly
+    packed 400x240 1-bit framebuffer: 50 bytes per row (400 bits
+    MSB-first), 240 rows, no padding -- 12000 bytes total. 1 = white,
+    0 = black. The firmware does not ack; we just write + flush.
+    """
+    if len(fb_bytes) != 50 * 240:
+        raise ValueError(
+            f"framebuffer must be {50*240} bytes, got {len(fb_bytes)}"
+        )
+    try:
+        ser.write(b"bitmap\n")
+        ser.write(fb_bytes)
+        ser.flush()
+    except Exception:
+        pass
+
+
+def launch_pdx_path(ser, pdx_path):
+    """Send the Playdate firmware's `run <path>` serial command to launch
+    a .pdx by absolute device-side path (e.g. /Games/CrankBoy.pdx).
+
+    The device doesn't ack; we just write and flush.
+    """
+    cmd = f"run {pdx_path}\n"
+    try:
+        ser.write(cmd.encode("utf-8"))
+        ser.flush()
+    except Exception:
+        pass
+
+
+def cb_fwdinstall(ser, timeout=15.0, on_line=None):
+    """Tell CrankBoy to install/refresh the shared forwarder. Returns the
+    install dir path (e.g. "/Shared/.forwarder/<bundleID>") on success,
+    or None on failure / unsupported.
+    """
+    send_command(ser, "cb:fwdinstall")
+    import time as _t
+    deadline = _t.time() + timeout
+    while _t.time() < deadline:
+        line = read_response(ser, timeout=1.0, on_line=on_line)
+        if not line or not line.startswith("cb:fwdinstall:"):
+            continue
+        rest = line[len("cb:fwdinstall:"):]
+        if rest.startswith("ok:"):
+            return urllib.parse.unquote(rest[len("ok:"):])
+        if rest.startswith("error:"):
+            return None
+    return None
+
+
+def parse_version_tuple(version_str):
+    """Best-effort parse of a "vX.Y.Z" or "X.Y.Z" string into a tuple. Any
+    non-numeric prefix is stripped, suffixes ignored. Missing parts default
+    to 0. Returns None if parsing fails entirely.
+    """
+    if not version_str:
+        return None
+    s = version_str.strip()
+    if s.startswith("v") or s.startswith("V"):
+        s = s[1:]
+    # Cut on first non-version char (whitespace, '-', '+', etc.)
+    for i, ch in enumerate(s):
+        if not (ch.isdigit() or ch == '.'):
+            s = s[:i]
+            break
+    parts = s.split('.')
+    try:
+        nums = [int(p) for p in parts if p != ""]
+    except ValueError:
+        return None
+    if not nums:
+        return None
+    while len(nums) < 3:
+        nums.append(0)
+    return tuple(nums[:3])
+
+
+def version_at_least(version_str, minimum=(2, 0, 3)):
+    """True if the parsed version string is >= minimum tuple."""
+    v = parse_version_tuple(version_str)
+    if v is None:
+        return False
+    return v >= tuple(minimum)

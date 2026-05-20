@@ -169,10 +169,14 @@ def build_linux(flatpak=False):
         binary_name = APP_NAME.lower()
         appdir = f"dist/{APP_NAME}.AppDir"
 
-    if not flatpak:
-        # Generate version module with hardcoded version
-        generate_version_module()
+    # Bake VERSION (read from .version) into src/_version_built.py so the
+    # runtime import in src/version.py finds it. Both build paths use
+    # this -- PyInstaller picks it up via --add-data src:src on the
+    # AppImage path, and the Flatpak path copies the whole src/ tree
+    # to /app/share/.../src/ via shutil.copytree.
+    generate_version_module()
 
+    if not flatpak:
         cmd = [
             "pyinstaller",
             "--onefile",

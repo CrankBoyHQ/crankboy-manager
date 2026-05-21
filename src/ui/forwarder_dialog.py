@@ -195,7 +195,11 @@ class ForwarderDialog(QDialog):
         self._device_version = None
 
         self.setWindowTitle("Create CrankBoy Forwarder")
-        self.setMinimumSize(560, 520)
+        # Min height has to comfortably fit: banner (~30) + ROM box
+        # (~155) + config box (icon row 128 + card row 155 +
+        # checkboxes 60 + padding ~40) + action row (~40) + log view
+        # min (100) + outer margins (~30).
+        self.setMinimumSize(600, 780)
         self.setModal(False)
         self.setAcceptDrops(True)
 

@@ -146,12 +146,22 @@ def eject(mount_path, log=None):
         return False
 
     if sys.platform.startswith("linux"):
-        if not shutil.which("gio"):
-            _log("eject: 'gio' not found; install glib2")
-            return False
+        # Inside a Flatpak sandbox, `gio` ships in the runtime but it
+        # talks to the user-session gvfs daemon, which the sandbox
+        # can't reach. Delegate to the host's gio via flatpak-spawn.
+        # Requires --talk-name=org.freedesktop.Flatpak in finish-args.
+        in_flatpak = os.path.exists("/.flatpak-info")
+        if in_flatpak:
+            cmd_prefix = ["flatpak-spawn", "--host"]
+        else:
+            cmd_prefix = []
+            if not shutil.which("gio"):
+                _log("eject: 'gio' not found; install glib2")
+                return False
         for attempt in range(1, 11):
-            _log(f"eject: gio mount --eject {mount_path} (attempt {attempt})")
-            if _run(["gio", "mount", "--eject", mount_path]):
+            cmd = cmd_prefix + ["gio", "mount", "--eject", mount_path]
+            _log(f"eject: {' '.join(cmd)} (attempt {attempt})")
+            if _run(cmd):
                 return True
             time.sleep(1)
         _log("eject: gio mount --eject failed after 10 attempts")

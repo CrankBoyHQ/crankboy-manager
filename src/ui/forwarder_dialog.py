@@ -194,7 +194,7 @@ class ForwarderDialog(QDialog):
         # show "Connected" here it's already library-or-sft-modal.
         self._device_version = None
 
-        self.setWindowTitle("Create CrankBoy Forwarder")
+        self.setWindowTitle("Create CrankBoy Launcher Forwarder")
         # Min height has to comfortably fit: banner (~30) + ROM box
         # (~155) + config box (icon row 128 + card row 155 +
         # checkboxes 60 + padding ~40) + action row (~40) + log view

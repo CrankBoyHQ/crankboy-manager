@@ -155,7 +155,7 @@ class MainWindow(QMainWindow):
         self.remove_btn.setEnabled(False)  # Disabled until items are selected
         list_header.addWidget(self.remove_btn)
 
-        self.forwarder_btn = QPushButton("Create Forwarder…")
+        self.forwarder_btn = QPushButton("Create Launcher…")
         self.forwarder_btn.setToolTip(
             "Open the launcher builder to wrap a ROM in a forwarder .pdx, launchable from the Playdate system menu directly"
         )

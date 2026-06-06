@@ -29,10 +29,13 @@ from PyQt6.QtWidgets import (
 from src.core.forwarder_worker import ForwarderWorker, LauncherCardWorker, MIN_CRANKBOY_VERSION
 from src.core.database import database as rom_database
 from src.core.transfer_engine import calculate_crc32, version_at_least
+from src.core import archive
 from src.ui.spinner import Spinner
 
 
 VALID_ROM_EXTS = ('.gb', '.gbc', '.gbz')
+# A ROM file, or an archive we can scan for exactly one ROM.
+ACCEPTED_ROM_INPUT_EXTS = VALID_ROM_EXTS + archive.ARCHIVE_EXTS
 VALID_IMAGE_EXTS = ('.png', '.jpg', '.jpeg', '.bmp', '.gif')
 
 # Pixel size of the in-dialog icon preview. The real launcher icon is
@@ -139,7 +142,10 @@ class _RomDropTarget(QLabel):
         self.set_placeholder()
 
     def set_placeholder(self):
-        self.setText("Drag a .gb / .gbc / .gbz file here, or click Browse…")
+        self.setText(
+            "Drag a .gb / .gbc / .gbz file (or an archive containing one) "
+            "here, or click Browse…"
+        )
         self.setStyleSheet(
             "QLabel { border: 2px dashed palette(mid); "
             "border-radius: 6px; padding: 16px; color: palette(mid); }"
@@ -168,7 +174,7 @@ class _RomDropTarget(QLabel):
         urls = event.mimeData().urls()
         for url in urls:
             path = url.toLocalFile()
-            if path and path.lower().endswith(VALID_ROM_EXTS):
+            if path and path.lower().endswith(ACCEPTED_ROM_INPUT_EXTS):
                 self.rom_dropped.emit(path)
                 event.acceptProposedAction()
                 return
@@ -217,7 +223,7 @@ class ForwarderDialog(QDialog):
         rom_box = QGroupBox("ROM")
         rom_layout = QVBoxLayout(rom_box)
         self.drop_target = _RomDropTarget()
-        self.drop_target.rom_dropped.connect(self._set_rom)
+        self.drop_target.rom_dropped.connect(self._handle_rom_input)
         rom_layout.addWidget(self.drop_target)
 
         rom_buttons = QHBoxLayout()
@@ -404,12 +410,53 @@ class ForwarderDialog(QDialog):
     # --- ROM selection helpers ---
 
     def _on_browse_clicked(self):
-        filter_str = "Game Boy ROMs (*.gb *.gbc *.gbz);;All files (*)"
+        filter_str = (
+            "Game Boy ROMs (*.gb *.gbc *.gbz);;"
+            "Archives (*.zip *.tar *.tar.gz *.tgz *.tar.bz2 *.tbz2 *.tar.xz *.txz);;"
+            "All files (*)"
+        )
         path, _ = QFileDialog.getOpenFileName(
             self, "Select a ROM", "", filter_str
         )
         if path:
-            self._set_rom(path)
+            self._handle_rom_input(path)
+
+    def _handle_rom_input(self, path):
+        """Route a dropped/browsed file to the ROM slot.
+
+        A bare ROM is set directly. An archive is scanned for ROMs and must
+        contain exactly one: a launcher forwarder targets a single game, so
+        zero or multiple ROMs is a surfaced error.
+        """
+        if not os.path.isfile(path):
+            QMessageBox.warning(self, "Invalid ROM", f"File not found: {path}")
+            return
+
+        if archive.is_archive(path):
+            name = os.path.basename(path)
+            try:
+                roms = archive.extract_roms(path)
+            except archive.ArchiveError as e:
+                QMessageBox.warning(self, "Archive error", str(e))
+                return
+            if len(roms) == 0:
+                QMessageBox.warning(
+                    self, "No ROM found",
+                    f"No .gb, .gbc, or .gbz ROM was found in {name}."
+                )
+                return
+            if len(roms) > 1:
+                QMessageBox.warning(
+                    self, "Multiple ROMs found",
+                    f"{name} contains {len(roms)} ROMs. A launcher forwarder "
+                    f"targets a single game — provide an archive with exactly "
+                    f"one ROM, or pick a ROM file directly."
+                )
+                return
+            self._set_rom(roms[0])
+            return
+
+        self._set_rom(path)
 
     def _set_rom(self, path):
         if not os.path.isfile(path):
@@ -717,8 +764,8 @@ class ForwarderDialog(QDialog):
         urls = event.mimeData().urls()
         for url in urls:
             path = url.toLocalFile()
-            if path and path.lower().endswith(VALID_ROM_EXTS):
-                self._set_rom(path)
+            if path and path.lower().endswith(ACCEPTED_ROM_INPUT_EXTS):
+                self._handle_rom_input(path)
                 event.acceptProposedAction()
                 return
         event.ignore()

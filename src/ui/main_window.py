@@ -542,7 +542,9 @@ class MainWindow(QMainWindow):
             self,
             "Select ROM Files",
             "",
-            "Game Boy ROMs (*.gb *.gbc *.gbz);;ZIP Archives (*.zip);;All Files (*.*)"
+            "Game Boy ROMs (*.gb *.gbc *.gbz);;"
+            "Archives (*.zip *.tar *.tar.gz *.tgz *.tar.bz2 *.tbz2 *.tar.xz *.txz);;"
+            "All Files (*.*)"
         )
         if files:
             self.file_list.add_files(files)

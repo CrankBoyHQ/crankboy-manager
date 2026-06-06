@@ -11,6 +11,7 @@ from PyQt6.QtGui import QDragEnterEvent, QDropEvent
 from src.core.transfer_engine import get_file_info_with_crc
 from src.core.constants import FileStatus, ArtStatus, ART_STATUS_LEGEND
 from src.core.database import database as rom_database
+from src.core import archive
 
 
 PORTAL_FILETRANSFER_MIME = "application/vnd.portal.filetransfer"
@@ -60,7 +61,7 @@ class FileListWidget(QTableWidget):
 
     files_added = pyqtSignal(list)  # List of filepaths
     file_removed = pyqtSignal(str)  # Filepath removed
-    log_message = pyqtSignal(str)  # Log messages for ZIP extraction
+    log_message = pyqtSignal(str)  # Log messages for archive extraction
     delete_requested = pyqtSignal()  # Delete/Backspace pressed with a selection
 
     def __init__(self, parent=None):
@@ -155,9 +156,9 @@ class FileListWidget(QTableWidget):
             if os.path.isdir(filepath):
                 # Scan folder for ROM files
                 added_files.extend(self._scan_folder(filepath))
-            elif filepath.lower().endswith('.zip'):
-                # Extract ROMs from ZIP file (adds directly to list)
-                self._extract_zip(filepath)
+            elif archive.is_archive(filepath):
+                # Extract ROMs from the archive (adds directly to list)
+                self._extract_archive(filepath)
             elif self._is_valid_rom(filepath):
                 added_files.append(filepath)
 
@@ -168,14 +169,14 @@ class FileListWidget(QTableWidget):
             event.ignore()
 
     def _scan_folder(self, folder_path):
-        """Scan folder for ROM files and ZIP archives."""
+        """Scan folder for ROM files and archives."""
         files = []
         try:
             for entry in os.scandir(folder_path):
                 if entry.is_file():
-                    if entry.path.lower().endswith('.zip'):
-                        # Extract ROMs from ZIP files found in folders (adds directly to list)
-                        self._extract_zip(entry.path)
+                    if archive.is_archive(entry.path):
+                        # Extract ROMs from archives found in folders (adds directly to list)
+                        self._extract_archive(entry.path)
                     elif self._is_valid_rom(entry.path):
                         files.append(entry.path)
                 elif entry.is_dir():
@@ -185,52 +186,29 @@ class FileListWidget(QTableWidget):
         return files
 
     def _is_valid_rom(self, filepath):
-        """Check if file is a valid ROM or ZIP archive."""
+        """Check if file is a valid ROM."""
         ext = os.path.splitext(filepath)[1].lower()
-        return ext in ['.gb', '.gbc', '.gbz', '.zip']
+        return ext in archive.ROM_EXTS
 
-    def _extract_zip(self, zip_path):
-        """Extract ROM files from ZIP archive and add them to the list."""
-        import zipfile
-        import tempfile
+    def _extract_archive(self, archive_path):
+        """Extract every ROM from an archive and add them to the list.
 
-        extracted_files = []
-        temp_dir = tempfile.mkdtemp(prefix='crankboy_zip_')
-
+        The normal ROM-upload flow accepts any number of ROMs, so all of
+        them are added.
+        """
+        name = os.path.basename(archive_path)
         try:
-            with zipfile.ZipFile(zip_path, 'r') as zf:
-                # Iterate through all files in ZIP
-                for item in zf.namelist():
-                    # Skip directories
-                    if item.endswith('/'):
-                        continue
-
-                    # Skip macOS resource fork files (dot files)
-                    if os.path.basename(item).startswith('._'):
-                        continue
-
-                    # Check if it's a ROM file
-                    ext = os.path.splitext(item)[1].lower()
-                    if ext in ['.gb', '.gbc', '.gbz']:
-                        # Extract to temp directory
-                        zf.extract(item, temp_dir)
-                        extracted_path = os.path.join(temp_dir, item)
-                        extracted_files.append(extracted_path)
-
-        except zipfile.BadZipFile:
-            self.log_message.emit(f"Error: {os.path.basename(zip_path)} is not a valid ZIP file")
-            return 0
-        except Exception as e:
-            self.log_message.emit(f"Error extracting {os.path.basename(zip_path)}: {e}")
+            extracted_files = archive.extract_roms(archive_path)
+        except archive.ArchiveError as e:
+            self.log_message.emit(f"Error: {e}")
             return 0
 
-        # Log extraction count
         if extracted_files:
-            self.log_message.emit(f"Extracted {len(extracted_files)} ROM(s) from {os.path.basename(zip_path)}")
+            self.log_message.emit(f"Extracted {len(extracted_files)} ROM(s) from {name}")
             # Add extracted files to the list (duplicate checking handled by _add_files)
             self._add_files(extracted_files)
         else:
-            self.log_message.emit(f"No ROM files found in {os.path.basename(zip_path)}")
+            self.log_message.emit(f"No ROM files found in {name}")
 
         return len(extracted_files)
 
@@ -354,12 +332,12 @@ class FileListWidget(QTableWidget):
         """Public method to add files (e.g., from file dialog)."""
         all_files = []
         for filepath in filepaths:
-            if filepath.lower().endswith('.zip'):
-                # Extract ROMs from ZIP file (adds directly to list)
-                self._extract_zip(filepath)
+            if archive.is_archive(filepath):
+                # Extract ROMs from the archive (adds directly to list)
+                self._extract_archive(filepath)
             elif self._is_valid_rom(filepath):
                 all_files.append(filepath)
-        # Add regular ROM files (ZIP files are already added by _extract_zip)
+        # Add regular ROM files (archives are already added by _extract_archive)
         if all_files:
             self._add_files(all_files)
 

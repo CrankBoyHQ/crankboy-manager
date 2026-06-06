@@ -102,6 +102,9 @@ chmod +x build.sh
 #### Linux (Flatpak)
 
 ```bash
+# requirements-flatpak.txt is generated from requirements.txt (dropping
+# NO-FLATPAK lines); build_flatpak.sh does this for you.
+grep -v 'NO-FLATPAK' requirements.txt > requirements-flatpak.txt
 flatpak run --command=flatpak-pip-generator org.flatpak.Builder --requirements-file=requirements-flatpak.txt
 flatpak run --command=flathub-build org.flatpak.Builder --install io.github.crankboyhq.crankboy-manager.json
 flatpak run --command=flatpak-builder-lint org.flatpak.Builder manifest io.github.crankboyhq.crankboy-manager.json

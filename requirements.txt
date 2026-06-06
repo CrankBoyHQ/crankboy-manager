@@ -1,5 +1,8 @@
-PyQt6>=6.4.0
-PyQt6-Qt6>=6.4.0
 pyserial>=3.5
 certifi>=2024.2.2
-Pillow>=10.0.0
+# Pillow 12.0+ switched its build system to pybind11, which the Flatpak
+# build can't pull (--no-build-isolation); cap below 12 for both builds.
+Pillow>=10.0.0,<12.0
+# PyQt is provided by the Flatpak Qt runtime/BaseApp, so it's native-only.  # NO-FLATPAK
+PyQt6>=6.4.0  # NO-FLATPAK
+PyQt6-Qt6>=6.4.0  # NO-FLATPAK

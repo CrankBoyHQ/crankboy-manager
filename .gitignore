@@ -109,3 +109,5 @@ src/_version_built.py
 .flatpak-builder
 builddir
 repo
+# Generated from requirements.txt by build_flatpak.sh
+requirements-flatpak.txt

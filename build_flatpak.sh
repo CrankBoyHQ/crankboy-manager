@@ -13,6 +13,11 @@ if ! flatpak info org.flatpak.Builder >/dev/null 2>&1; then
     exit 1
 fi
 
+# Generate the Flatpak requirements from the single requirements.txt by
+# dropping lines tagged NO-FLATPAK (PyQt comes from the Qt runtime/BaseApp).
+echo ">>> Generating $REQS from requirements.txt"
+grep -v 'NO-FLATPAK' requirements.txt > "$REQS"
+
 echo ">>> Generating python3-requirements-flatpak.json"
 flatpak run --command=flatpak-pip-generator org.flatpak.Builder --requirements-file="$REQS"
 

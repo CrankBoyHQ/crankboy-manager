@@ -186,6 +186,7 @@ def build_forwarder_pdx(
     shared_base_dir=DEFAULT_SHARED_BASE_DIR,
     launcher_icon=None,
     launcher_card=None,
+    download_art=True,
     log=None,
 ):
     """Assemble the forwarder .pdx in `out_parent_dir`.
@@ -296,14 +297,17 @@ def build_forwarder_pdx(
         # Look up the ROM in the manager DB to find the libretro `long`
         # name; that's what drives the cover-fetch URL. Best-effort:
         # if the DB or the network is unavailable, the composer falls
-        # through to the text fallback.
+        # through to the text fallback. When download_art is off we skip
+        # the DB lookup entirely so the composer goes straight to the
+        # text fallback (no network).
         rom_info = None
-        try:
-            from src.core.database import database as _rom_db
-            rom_info = _rom_db.lookup(crc32)
-        except Exception as e:
-            if log:
-                log(f"  card: DB lookup raised {e!r}")
+        if download_art:
+            try:
+                from src.core.database import database as _rom_db
+                rom_info = _rom_db.lookup(crc32)
+            except Exception as e:
+                if log:
+                    log(f"  card: DB lookup raised {e!r}")
         launcher_card = icon_builder.compose_launcher_card(
             title=name,
             rom_info=rom_info,

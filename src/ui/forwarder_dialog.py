@@ -393,6 +393,16 @@ class ForwarderDialog(QDialog):
         self.log_view.setPlaceholderText("Progress will appear here.")
         layout.addWidget(self.log_view, stretch=1)
 
+        # Mirror the main window's "Download Cover Art" toggle so the
+        # preview re-composes when it changes while this dialog is open.
+        if parent is not None and hasattr(parent, "download_cover_cb"):
+            try:
+                parent.download_cover_cb.toggled.connect(
+                    self._on_art_download_toggled
+                )
+            except Exception:
+                pass
+
         # Hook into the main window's connection-state stream.
         if parent is not None and hasattr(parent, "connection_changed"):
             try:
@@ -587,6 +597,33 @@ class ForwarderDialog(QDialog):
 
     # --- launcher card ----------------------------------------------------
 
+    def _art_downloads_enabled(self):
+        """Whether the forwarder may download launcher card/icon art.
+
+        Mirrors the main window's "Download Cover Art" checkbox. When the
+        parent window or checkbox isn't available (e.g. in tests) we
+        default to enabled.
+        """
+        pw = self._parent_window
+        cb = getattr(pw, "download_cover_cb", None) if pw is not None else None
+        if cb is None:
+            return True
+        try:
+            return cb.isChecked()
+        except Exception:
+            return True
+
+    def _on_art_download_toggled(self, _checked):
+        """Re-compose the preview when the main window's "Download Cover
+        Art" checkbox flips, so the card/icon reflect the new setting.
+        """
+        if self._rom_path:
+            self._auto_card = None
+            self._auto_icon = None
+            self._refresh_icon_preview()
+            self._start_card_compose(self._rom_path)
+            self._refresh_card_preview()
+
     def _start_card_compose(self, rom_path):
         """Kick off the LauncherCardWorker for `rom_path`. Cancels any
         in-flight worker first.
@@ -605,7 +642,11 @@ class ForwarderDialog(QDialog):
         filename_fallback = os.path.splitext(os.path.basename(rom_path))[0]
         title = crankboy_display_title(rom_info, filename_fallback)
 
-        worker = LauncherCardWorker(rom_path, title, rom_info, parent=self)
+        worker = LauncherCardWorker(
+            rom_path, title, rom_info,
+            download_art=self._art_downloads_enabled(),
+            parent=self,
+        )
         worker.card_ready.connect(self._on_card_ready)
         self._card_worker = worker
         self._card_worker_rom = rom_path
@@ -917,6 +958,7 @@ class ForwarderDialog(QDialog):
         options = {
             'share_crankboy_bin': self.share_crankboy_bin_cb.isChecked(),
             'share_rom': self.share_rom_cb.isChecked(),
+            'download_art': self._art_downloads_enabled(),
             'db_titles': {self._rom_path: db_title} if db_title else {},
             'launcher_icons':
                 {self._rom_path: icon_for_install} if icon_for_install else {},

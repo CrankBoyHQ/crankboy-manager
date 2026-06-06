@@ -1,6 +1,18 @@
 """Settings management for CrankBoy Manager."""
 
-from PyQt6.QtCore import QSettings
+from PyQt6.QtCore import QLocale, QSettings
+
+
+def _default_download_cover_art():
+    """Default value for the download-cover-art setting, based on the
+    host system locale."""
+    name = QLocale.system().name()  # e.g. "en_US", "ja_JP", "ko_KR"
+    parts = name.replace("-", "_").split("_")
+    language = parts[0].lower() if parts else ""
+    territory = parts[1].upper() if len(parts) > 1 else ""
+    if language in ("ja", "ko") or territory in ("JP", "KR", "KP"):
+        return False
+    return True
 
 
 class Settings:
@@ -35,7 +47,11 @@ class Settings:
     
     def get_download_cover_art(self):
         """Get download-cover-art setting."""
-        return self._settings.value("transfer/download_cover_art", True, type=bool)
+        return self._settings.value(
+            "transfer/download_cover_art",
+            _default_download_cover_art(),
+            type=bool,
+        )
 
     def set_download_cover_art(self, enabled):
         """Save download-cover-art setting."""

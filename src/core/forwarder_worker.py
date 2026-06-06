@@ -56,11 +56,12 @@ class LauncherCardWorker(QThread):
     # (rom_path, card_image_or_none, icon_image_or_none)
     card_ready = pyqtSignal(str, object, object)
 
-    def __init__(self, rom_path, title, rom_info, parent=None):
+    def __init__(self, rom_path, title, rom_info, download_art=True, parent=None):
         super().__init__(parent)
         self.rom_path = rom_path
         self.title = title
         self.rom_info = rom_info
+        self.download_art = download_art
 
     def run(self):
         from concurrent.futures import ThreadPoolExecutor
@@ -68,6 +69,17 @@ class LauncherCardWorker(QThread):
             compose_launcher_card,
             fetch_bundle_override,
         )
+
+        if not self.download_art:
+            # No network lookups: compose the text-only card locally (passing
+            # rom_info=None skips the libretro/cover fetch) and keep the
+            # locally-generated icon (icon_img=None).
+            try:
+                card_img = compose_launcher_card(title=self.title, rom_info=None)
+            except Exception:
+                card_img = None
+            self.card_ready.emit(self.rom_path, card_img, None)
+            return
 
         # Kick both lookups off in parallel. Each one is bounded by the
         # ~5s HTTP timeout inside _http_fetch.
@@ -163,6 +175,7 @@ class ForwarderWorker(QThread):
     def run(self):
         share_crankboy_bin = bool(self.options.get("share_crankboy_bin", True))
         share_rom = bool(self.options.get("share_rom", True))
+        download_art = bool(self.options.get("download_art", True))
         db_titles = self.options.get("db_titles", {}) or {}
 
         ser = None
@@ -321,6 +334,7 @@ class ForwarderWorker(QThread):
                     db_title=db_titles.get(rom_path),
                     launcher_icon=(self.options.get("launcher_icons", {}) or {}).get(rom_path),
                     launcher_card=(self.options.get("launcher_cards", {}) or {}).get(rom_path),
+                    download_art=download_art,
                 )
                 self.rom_completed.emit(rom_path, ok, msg)
                 if ok and install_pdx:
@@ -361,7 +375,7 @@ class ForwarderWorker(QThread):
     def _build_one(self, *, rom_path, mount, out_parent_dir, share_crankboy_bin,
                    share_rom, pdxinfo, fwd_install_path, crankboy_bin_source,
                    db_title, launcher_icon=None, launcher_card=None,
-                   crankboy_pdx_root=None):
+                   crankboy_pdx_root=None, download_art=True):
         base = os.path.basename(rom_path)
         try:
             self._emit(f"  > {base}: assembling .pdx (db_title={db_title!r})")
@@ -377,6 +391,7 @@ class ForwarderWorker(QThread):
                     db_title=db_title,
                     launcher_icon=launcher_icon,
                     launcher_card=launcher_card,
+                    download_art=download_art,
                     log=self._emit,
                 )
                 self._emit(

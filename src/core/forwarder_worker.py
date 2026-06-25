@@ -246,13 +246,24 @@ class ForwarderWorker(QThread):
 
             if share_crankboy_bin:
                 self._emit("[5/8] Installing shared crankboy.bin on device (cb:fwdinstall)...")
+                # The device may still be processing the cb:pdxinfo response;
+                # a short pause avoids a spurious timeout on the first attempt.
+                time.sleep(1)
                 t0 = time.time()
                 fwd_install_path = cb_fwdinstall(ser, on_line=on_dev_line)
                 self._emit(
-                    f"  fwdinstall result: {fwd_install_path!r} ({time.time()-t0:.2f}s)"
+                    f"  fwdinstall result (attempt 1): {fwd_install_path!r} ({time.time()-t0:.2f}s)"
                 )
                 if not fwd_install_path:
-                    self._emit("[FAIL] cb:fwdinstall failed -- aborting.")
+                    self._emit("  cb:fwdinstall timed out -- retrying once...")
+                    t1 = time.time()
+                    fwd_install_path = cb_fwdinstall(ser, on_line=on_dev_line)
+                    self._emit(
+                        f"  fwdinstall result (attempt 2): {fwd_install_path!r} "
+                        f"({time.time()-t1:.2f}s)"
+                    )
+                if not fwd_install_path:
+                    self._emit("[FAIL] cb:fwdinstall failed after 2 attempts -- aborting.")
                     self.all_completed.emit(False)
                     return
             else:
@@ -266,12 +277,12 @@ class ForwarderWorker(QThread):
                 self._emit(f"  serial.close raised: {e!r}")
             ser = None
 
-            self._emit("  waiting for PLAYDATE volume to appear...")
+            self._emit("  waiting for PLAYDATE volume (may take up to 2 minutes)...")
             t0 = time.time()
             mount = data_disk.find_mount(
-                timeout=25.0, log=lambda m: self._emit("  " + m)
+                timeout=120.0, log=lambda m: self._emit("  " + m)
             )
-            self._emit(f"  mount discovery: {mount!r} ({time.time()-t0:.2f}s)")
+            self._emit(f"  mount: {mount!r} ({time.time()-t0:.2f}s)")
             if not mount:
                 self._emit(
                     "[FAIL] Could not find the PLAYDATE volume after switching "

@@ -54,45 +54,52 @@ def _candidate_mount_dirs():
     return []
 
 
-def find_mount(timeout=20.0, log=None):
-    """Poll for the PLAYDATE volume mount and return its absolute path.
+def find_mount(timeout=120.0, log=None):
+    """Poll for the PLAYDATE volume and return its absolute path.
 
-    Returns None on timeout. Optional `log` is a callable that receives a
-    single human-readable message; emitted at most once per second to
+    On macOS and Linux this waits until the ''Games'' subdirectory
+    inside the volume is visible — confirming the FAT32 filesystem has
+    been fully attached, not just the mount-point directory created.
+    This eliminates the need for a separate readiness check.
+
+    Returns None on timeout.  Optional *log* is a callable receiving a
+    single human-readable message; emitted at most once every 5 s to
     avoid spamming.
     """
     bases = [] if sys.platform == "win32" else _candidate_mount_dirs()
     if log:
         if sys.platform == "win32":
-            log("find_mount: scanning Windows drive letters by volume label")
+            log("scanning Windows drive letters for PLAYDATE...")
         elif bases:
-            log("find_mount: scanning " + ", ".join(bases))
+            log("scanning " + ", ".join(bases) + " for PLAYDATE...")
         else:
-            log("find_mount: no candidate mount directories on this platform!")
+            log("no candidate mount directories on this platform!")
 
     deadline = time.time() + timeout
     last_log = 0.0
     while time.time() < deadline:
         if sys.platform == "win32":
             path = _find_mount_windows()
-            if path:
+            if path and os.path.isdir(os.path.join(path, "Games")):
                 if log:
-                    log(f"find_mount: found {path}")
+                    log(f"found {path} (ready)")
                 return path
         else:
             for base in bases:
                 candidate = os.path.join(base, PLAYDATE_VOLUME_LABEL)
-                if os.path.isdir(candidate):
+                games_dir = os.path.join(candidate, "Games")
+                if os.path.isdir(games_dir):
                     if log:
-                        log(f"find_mount: found {candidate}")
+                        log(f"found {candidate} (ready)")
                     return candidate
-        if log and (time.time() - last_log) >= 1.0:
-            last_log = time.time()
-            elapsed = time.time() - (deadline - timeout)
-            log(f"find_mount: still waiting... ({elapsed:.0f}s elapsed)")
-        time.sleep(0.4)
+        now = time.time()
+        if log and (now - last_log) >= 5.0:
+            last_log = now
+            elapsed = now - (deadline - timeout)
+            log(f"still waiting... ({elapsed:.0f}s elapsed)")
+        time.sleep(0.5)
     if log:
-        log(f"find_mount: timed out after {timeout:.0f}s")
+        log(f"timed out after {timeout:.0f}s")
     return None
 
 

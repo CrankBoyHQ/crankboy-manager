@@ -385,7 +385,7 @@ def launch_pdx_path(ser, pdx_path):
         pass
 
 
-def cb_fwdinstall(ser, timeout=15.0, on_line=None):
+def cb_fwdinstall(ser, timeout=20.0, on_line=None):
     """Tell CrankBoy to install/refresh the shared forwarder. Returns the
     install dir path (e.g. "/Shared/.forwarder/<bundleID>") on success,
     or None on failure / unsupported.

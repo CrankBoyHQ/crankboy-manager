@@ -91,6 +91,7 @@ def build_windows():
         "--hidden-import", "serial",
         "--hidden-import", "serial.tools.list_ports",
         "--hidden-import", "certifi",
+        "--hidden-import", "PIL",
         "--clean",
     ]
 
@@ -132,6 +133,7 @@ def build_macos():
         "--hidden-import", "serial",
         "--hidden-import", "serial.tools.list_ports",
         "--hidden-import", "certifi",
+        "--hidden-import", "PIL",
         "--clean",
     ]
 
@@ -187,6 +189,7 @@ def build_linux(flatpak=False):
             "--hidden-import", "serial",
             "--hidden-import", "serial.tools.list_ports",
             "--hidden-import", "certifi",
+            "--hidden-import", "PIL",
             "--clean",
         ]
 

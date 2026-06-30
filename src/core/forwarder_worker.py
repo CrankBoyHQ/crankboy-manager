@@ -148,6 +148,7 @@ class ForwarderWorker(QThread):
     rom_completed = pyqtSignal(str, bool, str)   # rom_path, success, message
     forwarder_installed = pyqtSignal(str, str)   # rom_path, device-side pdx path (/Games/<dir>.pdx)
     all_completed = pyqtSignal(bool)             # overall_success
+    manual_eject_required = pyqtSignal(str)      # user-facing manual-eject message
 
     def __init__(self, port, rom_paths, options):
         """
@@ -357,7 +358,7 @@ class ForwarderWorker(QThread):
             t0 = time.time()
             ejected = self._eject_quiet(mount)
             self._emit(
-                f"  eject -> {ejected} ({time.time()-t0:.2f}s)"
+                f"  eject -> {bool(ejected)} ({time.time()-t0:.2f}s)"
             )
             if not ejected:
                 self._emit(
@@ -466,7 +467,11 @@ class ForwarderWorker(QThread):
 
     def _push_shared_rom(self, mount, rom_path):
         """Copy the ROM into /Shared/Emulation/gb/games/<basename> on the
-        mounted data disk, unless an identical-size copy is already there.
+        mounted data disk, overwriting any existing file with the same name.
+
+        We always replace rather than skip on a size match: a same-named ROM
+        can differ in content (region, revision, hack), and the user expects
+        the ROM they selected to land on the device.
         """
         from src.core.forwarder_builder import DEFAULT_SHARED_BASE_DIR
         basename = os.path.basename(rom_path)
@@ -475,17 +480,19 @@ class ForwarderWorker(QThread):
         os.makedirs(target_dir, exist_ok=True)
         target = os.path.join(target_dir, basename)
         src_size = os.path.getsize(rom_path)
-        if os.path.isfile(target) and os.path.getsize(target) == src_size:
-            self._emit(
-                f"    shared ROM already at {target} ({src_size} B), skipping copy"
-            )
-            return
         self._emit(f"    pushing ROM -> {target} ({src_size} B)")
         shutil.copy(rom_path, target)
 
     def _eject_quiet(self, mount):
         try:
-            return data_disk.eject(mount, log=lambda m: self._emit("  " + m))
+            result = data_disk.eject(mount, log=lambda m: self._emit("  " + m))
         except Exception as e:
             self._emit(f"  eject raised: {e!r}")
-            return False
+            result = data_disk.EjectResult(False, data_disk.manual_eject_message())
+        if not result:
+            # Surface a modal so the user knows to eject by hand before
+            # reconnecting; otherwise the device is stuck in data-disk mode.
+            self.manual_eject_required.emit(
+                result.manual_prompt or data_disk.manual_eject_message()
+            )
+        return result

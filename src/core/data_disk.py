@@ -124,18 +124,63 @@ def _find_mount_windows():
     return None
 
 
-def eject(mount_path, log=None):
-    """Eject the PLAYDATE volume. Returns True on success.
+class EjectResult:
+    """Outcome of an eject attempt.
 
-    On Linux this uses `gio mount --eject`, matching ~/.scripts/pd-install.
-    `gio mount --eject` performs an unmount followed by a SCSI EJECT which
-    is what makes the Playdate firmware actually leave data-disk mode (a
-    plain unmount or `udisksctl power-off` leaves it stuck on "Eject disk
-    to reboot"). The first attempt sometimes returns non-zero while the
-    device is still busy, so retry briefly.
+    Truthy when the eject succeeded. On failure, `manual_prompt` carries a
+    user-facing message the UI can show in a modal telling the user to
+    eject the device by hand.
+    """
+
+    def __init__(self, ok, manual_prompt=None):
+        self.ok = bool(ok)
+        self.manual_prompt = manual_prompt
+
+    def __bool__(self):
+        return self.ok
+
+    def __repr__(self):
+        return f"EjectResult(ok={self.ok})"
+
+
+def _in_flatpak():
+    return os.path.exists("/.flatpak-info")
+
+
+def manual_eject_message():
+    """User-facing instructions shown when automatic eject fails."""
+    msg = (
+        "CrankBoy couldn't eject the Playdate automatically.\n\n"
+        "Please eject the \"PLAYDATE\" volume manually (e.g. from your file "
+        "manager) before disconnecting, so the device leaves data-disk mode."
+    )
+    if (
+        sys.platform.startswith("linux")
+        and not _in_flatpak()
+        and not shutil.which("gio")
+    ):
+        msg += (
+            "\n\nTip: installing GLib's 'gio' tool (the 'glib2' / "
+            "'glib2-bin' package) lets CrankBoy eject automatically."
+        )
+    return msg
+
+
+def eject(mount_path, log=None):
+    """Eject the PLAYDATE volume. Returns an `EjectResult`.
+
+    The eject must perform an unmount followed by a SCSI EJECT, which is
+    what makes the Playdate firmware actually leave data-disk mode (a plain
+    unmount or `udisksctl power-off` leaves it stuck on "Eject disk to
+    reboot"). On Linux we do this via UDisks2 over the system D-Bus
+    (Filesystem.Unmount + Drive.Eject) -- this works inside the Flatpak
+    sandbox using only --system-talk-name=org.freedesktop.UDisks2, with no
+    host access. Outside the sandbox we fall back to `gio mount --eject`
+    (which drives the same operation through gvfs) if UDisks2 fails. The
+    device is often briefly busy right after a copy, so each method retries.
     """
     if not mount_path:
-        return False
+        return EjectResult(False, manual_eject_message())
 
     def _log(msg):
         if log:
@@ -147,39 +192,128 @@ def eject(mount_path, log=None):
         for attempt in range(1, 11):
             _log(f"eject: diskutil eject {mount_path} (attempt {attempt})")
             if _run(["diskutil", "eject", mount_path]):
-                return True
+                return EjectResult(True)
             time.sleep(1)
         _log("eject: diskutil eject failed after 10 attempts")
-        return False
+        return EjectResult(False, manual_eject_message())
 
     if sys.platform.startswith("linux"):
-        # Inside a Flatpak sandbox, `gio` ships in the runtime but it
-        # talks to the user-session gvfs daemon, which the sandbox
-        # can't reach. Delegate to the host's gio via flatpak-spawn.
-        # Requires --talk-name=org.freedesktop.Flatpak in finish-args.
-        in_flatpak = os.path.exists("/.flatpak-info")
-        if in_flatpak:
-            cmd_prefix = ["flatpak-spawn", "--host"]
+        device = _resolve_device(mount_path)
+        if device:
+            _log(f"eject: resolved {mount_path} -> {device}")
         else:
-            cmd_prefix = []
-            if not shutil.which("gio"):
-                _log("eject: 'gio' not found; install glib2")
-                return False
-        for attempt in range(1, 11):
-            cmd = cmd_prefix + ["gio", "mount", "--eject", mount_path]
-            _log(f"eject: {' '.join(cmd)} (attempt {attempt})")
-            if _run(cmd):
-                return True
-            time.sleep(1)
-        _log("eject: gio mount --eject failed after 10 attempts")
-        return False
+            _log(f"eject: could not resolve block device for {mount_path}")
+
+        # 1. UDisks2 over D-Bus. This is the only path available inside the
+        #    Flatpak sandbox, and the preferred one everywhere.
+        if device:
+            for attempt in range(1, 11):
+                _log(f"eject: UDisks2 unmount+eject {device} (attempt {attempt})")
+                if _udisks_eject_linux(device, _log):
+                    return EjectResult(True)
+                time.sleep(1)
+            _log("eject: UDisks2 eject failed after 10 attempts")
+
+        # 2. Outside the sandbox, fall back to host gio if available.
+        if not _in_flatpak():
+            if shutil.which("gio"):
+                for attempt in range(1, 11):
+                    cmd = ["gio", "mount", "--eject", mount_path]
+                    _log(f"eject: {' '.join(cmd)} (attempt {attempt})")
+                    if _run(cmd):
+                        return EjectResult(True)
+                    time.sleep(1)
+                _log("eject: gio mount --eject failed after 10 attempts")
+            else:
+                _log("eject: 'gio' not found; no fallback available")
+
+        return EjectResult(False, manual_eject_message())
 
     if sys.platform == "win32":
         _log(f"eject: Windows COM eject for {mount_path}")
-        return _eject_windows(mount_path)
+        if _eject_windows(mount_path):
+            return EjectResult(True)
+        return EjectResult(False, manual_eject_message())
 
     _log(f"eject: unsupported platform {sys.platform!r}")
-    return False
+    return EjectResult(False, manual_eject_message())
+
+
+def _udisks_eject_linux(device, log):
+    """Unmount and SCSI-eject `device` (e.g. /dev/sda1) via UDisks2 on the
+    system bus. Uses QtDBus, which is present both in the Qt runtime (inside
+    the Flatpak sandbox) and via the PyQt6 dependency natively. Returns True
+    on success.
+    """
+    try:
+        from PyQt6.QtDBus import QDBusConnection, QDBusInterface, QDBusMessage
+    except Exception as e:  # pragma: no cover - Qt should always be present
+        log(f"eject: QtDBus unavailable ({e!r})")
+        return False
+
+    UD = "org.freedesktop.UDisks2"
+    bus = QDBusConnection.systemBus()
+    if not bus.isConnected():
+        log("eject: system D-Bus not connected")
+        return False
+
+    name = os.path.basename(device)
+    block_path = "/org/freedesktop/UDisks2/block_devices/" + name
+
+    def _is_error(reply):
+        return reply.type() == QDBusMessage.MessageType.ErrorMessage
+
+    # Find the drive object that owns this block device.
+    props = QDBusInterface(UD, block_path, "org.freedesktop.DBus.Properties", bus)
+    if not props.isValid():
+        log(f"eject: no UDisks2 block object for {name}")
+        return False
+    drive_reply = props.call("Get", UD + ".Block", "Drive")
+    if _is_error(drive_reply):
+        log(f"eject: read Drive prop -> {drive_reply.errorName()}")
+        return False
+    drive_path = _dbus_object_path(drive_reply)
+    if not drive_path or drive_path == "/":
+        log("eject: block device has no associated drive")
+        return False
+
+    # Unmount the filesystem first. A "not mounted" error here is fine; the
+    # eject below is what matters, so only log and continue.
+    fs = QDBusInterface(UD, block_path, UD + ".Filesystem", bus)
+    if fs.isValid():
+        r = fs.call("Unmount", {})
+        if _is_error(r):
+            log(f"eject: Unmount -> {r.errorName()}: {r.errorMessage()}")
+
+    # SCSI eject -- this is what makes the Playdate leave data-disk mode.
+    drive = QDBusInterface(UD, drive_path, UD + ".Drive", bus)
+    if not drive.isValid():
+        log("eject: UDisks2 Drive interface invalid")
+        return False
+    r = drive.call("Eject", {})
+    if _is_error(r):
+        log(f"eject: Drive.Eject -> {r.errorName()}: {r.errorMessage()}")
+        return False
+    return True
+
+
+def _dbus_object_path(reply):
+    """Extract an object-path string from a QDBusMessage reply, unwrapping a
+    variant/QDBusObjectPath as needed. Returns None on failure.
+    """
+    try:
+        from PyQt6.QtDBus import QDBusVariant, QDBusObjectPath
+        args = reply.arguments()
+        if not args:
+            return None
+        val = args[0]
+        if isinstance(val, QDBusVariant):
+            val = val.variant()
+        if isinstance(val, QDBusObjectPath):
+            return val.path()
+        return str(val)
+    except Exception:
+        return None
 
 
 def _run(cmd):

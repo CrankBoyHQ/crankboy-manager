@@ -250,7 +250,7 @@ class ForwarderDialog(QDialog):
         )
         config_layout.addWidget(self.share_crankboy_bin_cb)
 
-        self.share_rom_cb = QCheckBox("Share ROM, saves, save states, etc.")
+        self.share_rom_cb = QCheckBox("Share ROM, settings, saves, states, etc.")
         self.share_rom_cb.setChecked(True)
         self.share_rom_cb.setToolTip(
             "Share the game ROM, save files, save states, etc. with "
@@ -989,8 +989,12 @@ class ForwarderDialog(QDialog):
         self._worker.rom_completed.connect(self._on_rom_completed)
         self._worker.forwarder_installed.connect(self._on_forwarder_installed)
         self._worker.all_completed.connect(self._on_all_completed)
+        self._worker.manual_eject_required.connect(self._on_manual_eject_required)
         self.worker_started.emit()
         self._worker.start()
+
+    def _on_manual_eject_required(self, message):
+        QMessageBox.warning(self, "Eject the Playdate", message)
 
     def _on_rom_completed(self, rom_path, success, message):
         self._log(f"{os.path.basename(rom_path)}: {message}")

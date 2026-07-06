@@ -214,13 +214,13 @@ jobs:
 
       - name: Lint Flatpak Manifest
         continue-on-error: true
-        run: flatpak-builder-lint manifest io.github.crankboyhq.crankboy-manager.json
+        run: flatpak-builder-lint manifest app.crankboy.crankboy-manager.json
 
       - name: Build Flatpak and upload output
         uses: flatpak/flatpak-github-actions/flatpak-builder@v6
         with:
-          bundle: io.github.crankboyhq.crankboy-manager.flatpak
-          manifest-path: io.github.crankboyhq.crankboy-manager.json
+          bundle: app.crankboy.crankboy-manager.flatpak
+          manifest-path: app.crankboy.crankboy-manager.json
           cache-key: flatpak-builder-${{ github.sha }}
           arch: ${{ matrix.target.arch }}
 
@@ -295,7 +295,7 @@ jobs:
 
           # Flatpak
           for arch in x86_64 aarch64; do
-            src="artifacts/io.github.crankboyhq.crankboy-manager-${arch}.flatpak/io.github.crankboyhq.crankboy-manager.flatpak"
+            src="artifacts/app.crankboy.crankboy-manager-${arch}.flatpak/app.crankboy.crankboy-manager.flatpak"
             if [ -f "$src" ]; then
               cp "$src" "release_assets/CrankBoyManager-${VERSION}-${arch}.flatpak"
             fi

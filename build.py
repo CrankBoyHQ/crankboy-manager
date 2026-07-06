@@ -208,6 +208,12 @@ def build_linux(flatpak=False):
         shutil.copytree("db", f"{app_share}/db")
         exec_target = f"python3 {app_share}/{MAIN_SCRIPT}"
         launcher_path = f"{appdir}/bin/{binary_name}"
+
+        # Flathub requires the license of every module to be installed to
+        # $FLATPAK_DEST/share/licenses/$FLATPAK_ID.
+        license_dir = f"{appdir}/share/licenses/{app_id}"
+        os.makedirs(license_dir, exist_ok=True)
+        shutil.copy("LICENSE", f"{license_dir}/LICENSE")
     else:
         # Create AppDir structure for AppImage
         os.makedirs(appdir, exist_ok=True)

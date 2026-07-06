@@ -106,10 +106,10 @@ chmod +x build.sh
 # NO-FLATPAK lines); build_flatpak.sh does this for you.
 grep -v 'NO-FLATPAK' requirements.txt > requirements-flatpak.txt
 flatpak run --command=flatpak-pip-generator org.flatpak.Builder --requirements-file=requirements-flatpak.txt
-flatpak run --command=flathub-build org.flatpak.Builder --install io.github.crankboyhq.crankboy-manager.json
-flatpak run --command=flatpak-builder-lint org.flatpak.Builder manifest io.github.crankboyhq.crankboy-manager.json
+flatpak run --command=flathub-build org.flatpak.Builder --install app.crankboy.crankboy-manager.json
+flatpak run --command=flatpak-builder-lint org.flatpak.Builder manifest app.crankboy.crankboy-manager.json
 flatpak run --command=flatpak-builder-lint org.flatpak.Builder repo repo
-flatpak run io.github.crankboyhq.crankboy-manager
+flatpak run app.crankboy.crankboy-manager
 ```
 
 ### Advanced Build Options

@@ -111,3 +111,5 @@ builddir
 repo
 # Generated from requirements.txt by build_flatpak.sh
 requirements-flatpak.txt
+
+flathub/

@@ -21,46 +21,6 @@ grep -v 'NO-FLATPAK' requirements.txt > "$REQS"
 echo ">>> Generating python3-requirements-flatpak.json"
 flatpak run --command=flatpak-pip-generator org.flatpak.Builder --requirements-file="$REQS"
 
-# The pyserial/certifi/Pillow wheels don't bundle a license file, but
-# Flathub requires a license for every module to be installed to
-# $FLATPAK_DEST/share/licenses/$FLATPAK_ID. Patch in the upstream license
-# text (checked into licenses/) as an extra source per module.
-echo ">>> Patching python3-requirements-flatpak.json to install pip package licenses"
-python3 - "python3-requirements-flatpak.json" <<'PYEOF'
-import json
-import sys
-
-path = sys.argv[1]
-with open(path) as f:
-    manifest = json.load(f)
-
-# module name -> local license file (relative to this manifest's directory)
-LICENSES = {
-    "python3-pyserial": "licenses/pyserial-LICENSE.txt",
-    "python3-certifi": "licenses/certifi-LICENSE.txt",
-    "python3-Pillow": "licenses/pillow-LICENSE.txt",
-}
-
-for module in manifest["modules"]:
-    license_file = LICENSES.get(module["name"])
-    if license_file is None:
-        continue
-    dest_name = f"{module['name']}-LICENSE"
-    module["sources"].append({
-        "type": "file",
-        "path": license_file,
-        "dest-filename": dest_name,
-    })
-    module["build-commands"].append(
-        f'install -Dm644 "{dest_name}" '
-        f'"${{FLATPAK_DEST}}/share/licenses/${{FLATPAK_ID}}/{module["name"]}/LICENSE"'
-    )
-
-with open(path, "w") as f:
-    json.dump(manifest, f, indent=4)
-    f.write("\n")
-PYEOF
-
 echo ">>> Building flatpak"
 flatpak run --command=flathub-build org.flatpak.Builder "$MANIFEST"
 

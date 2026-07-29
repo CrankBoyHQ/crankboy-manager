@@ -284,16 +284,21 @@ class SerialWorker(QThread):
                 # Fill the window
                 send_window()
                 
-                # Process responses
+                # Process responses (drain all available)
                 if in_flight:
-                    proc_res = process_response(timeout=0.2)
-                    if isinstance(proc_res, tuple) and proc_res[0] is False:
-                        return False, proc_res[1]
+                    while True:
+                        proc_res = process_response(timeout=0.05)
+                        if proc_res is None:
+                            break
+                        if isinstance(proc_res, tuple) and proc_res[0] is False:
+                            return False, proc_res[1]
+                        if not in_flight:
+                            break
                     
                     # Check for timeouts
                     current_time = time.time()
                     timeouts = [(seq, info) for seq, info in in_flight.items() 
-                               if current_time - info['time'] > 0.5]
+                               if current_time - info['time'] > 2.0]
                     
                     if timeouts:
                         first_timeouts = [(seq, info) for seq, info in timeouts if info['retries'] == 0]
@@ -534,13 +539,18 @@ class SerialWorker(QThread):
                 send_window()
 
                 if in_flight:
-                    proc_res = process_response(timeout=0.2)
-                    if isinstance(proc_res, tuple) and proc_res[0] is False:
-                        return False, proc_res[1]
+                    while True:
+                        proc_res = process_response(timeout=0.05)
+                        if proc_res is None:
+                            break
+                        if isinstance(proc_res, tuple) and proc_res[0] is False:
+                            return False, proc_res[1]
+                        if not in_flight:
+                            break
 
                     current_time = time.time()
                     timeouts = [(seq, info) for seq, info in in_flight.items()
-                               if current_time - info['time'] > 0.5]
+                               if current_time - info['time'] > 2.0]
 
                     if timeouts:
                         first_timeouts = [(seq, info) for seq, info in timeouts if info['retries'] == 0]

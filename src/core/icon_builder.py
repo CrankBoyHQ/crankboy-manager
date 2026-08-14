@@ -309,12 +309,34 @@ _CRANKBOY_BUNDLES_MANIFEST = _CRANKBOY_BUNDLES_BASE + "manifest.json"
 _COVER_FETCH_TIMEOUT_S = 5.0
 
 
+def _ssl_context():
+    """Build an SSL context using certifi's CA bundle when available.
+
+    Inside a PyInstaller bundle the platform's default CA paths don't
+    exist, so a bare `ssl.create_default_context()` fails every HTTPS
+    handshake with CERTIFICATE_VERIFY_FAILED. Load certifi's cacert.pem
+    explicitly when present; fall back to the default context otherwise
+    (plain source runs, Flatpak, etc.).
+    """
+    import ssl
+    try:
+        import certifi
+    except Exception:
+        return ssl.create_default_context()
+    try:
+        return ssl.create_default_context(cafile=certifi.where())
+    except Exception:
+        return ssl.create_default_context()
+
+
 def _http_fetch(url: str, log=None) -> Optional[bytes]:
     """GET `url`, returning bytes on 200 or None on any failure."""
     import urllib.request
     try:
         req = urllib.request.Request(url, headers={"User-Agent": "crankboy-manager"})
-        with urllib.request.urlopen(req, timeout=_COVER_FETCH_TIMEOUT_S) as resp:
+        with urllib.request.urlopen(
+            req, timeout=_COVER_FETCH_TIMEOUT_S, context=_ssl_context()
+        ) as resp:
             if resp.status != 200:
                 if log:
                     log(f"  card: HTTP {resp.status} for {url}")

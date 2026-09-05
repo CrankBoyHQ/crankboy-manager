@@ -116,6 +116,72 @@ def build_windows():
     print(f"[OK] Archive created: dist/{zip_name}")
 
 
+# PyInstaller spec template for macOS bundles. Driving the build through a
+# spec (rather than --windowed/--icon CLI flags) lets us set `version` on the
+# EXE (drives CFBundleShortVersionString via BUNDLE) and inject CFBundleVersion
+# through BUNDLE(info_plist={...}). PyInstaller merges info_plist as a dict
+# (update()), and CFBundleVersion isn't in its base dict, so this survives.
+# Fields:
+#   name              - app/bundle name (a string literal)
+#   version           - version string literal (e.g. '1.1.0')
+#   bundle_identifier - CFBundleIdentifier value
+#   icon              - path to the .icns (string literal)
+_MACOS_SPEC_TEMPLATE = """# -*- mode: python ; coding: utf-8 -*-
+
+
+a = Analysis(
+    ['{main_script}'],
+    pathex=[],
+    binaries=[],
+    datas=[('src', 'src'), ('db', 'db')],
+    hiddenimports=['serial', 'serial.tools.list_ports', 'certifi', 'PIL'],
+    hookspath=[],
+    hooksconfig={{}},
+    runtime_hooks=[],
+    excludes=[],
+    noarchive=False,
+    optimize=0,
+)
+pyz = PYZ(a.pure)
+
+exe = EXE(
+    pyz,
+    a.scripts,
+    [],
+    exclude_binaries=True,
+    name={name},
+    debug=False,
+    bootloader_ignore_signals=False,
+    strip={strip},
+    upx=True,
+    console=False,
+    disable_windowed_traceback=False,
+    argv_emulation=False,
+    target_arch=None,
+    codesign_identity=None,
+    entitlements_file=None,
+    version={version},
+)
+coll = COLLECT(
+    exe,
+    a.binaries,
+    a.datas,
+    strip=False,
+    upx=True,
+    upx_exclude=[],
+    name={name},
+)
+app = BUNDLE(
+    coll,
+    name={name} + '.app',
+    icon={icon},
+    bundle_identifier={bundle_identifier},
+    version={version},
+    info_plist={{'CFBundleVersion': {version}}},
+)
+"""
+
+
 def build_macos():
     """Build macOS app bundle."""
     print("\n=== Building macOS app bundle ===")
@@ -123,26 +189,35 @@ def build_macos():
     # Generate version module with hardcoded version
     generate_version_module()
 
-    cmd = [
-        "pyinstaller",
-        "--onedir",  # Use onedir mode for macOS .app bundles
-        "--windowed",
-        "--name", APP_DISPLAY_NAME,
-        "--add-data", "src:src",
-        "--add-data", "db:db",
-        "--hidden-import", "serial",
-        "--hidden-import", "serial.tools.list_ports",
-        "--hidden-import", "certifi",
-        "--hidden-import", "PIL",
-        "--clean",
-    ]
+    # Inject CFBundleShortVersionString/CFBundleVersion so Get Info is
+    # correct. PyInstaller only honours these from the EXE/BUNDLE `version`
+    # args, not info_plist, so we drive them via a generated spec.
+    spec = Path(__file__).parent / ("macos-" + APP_DISPLAY_NAME.replace(" ", "_") + ".spec")
+    spec.write_text(_MACOS_SPEC_TEMPLATE.format(
+        main_script=MAIN_SCRIPT,
+        name=repr(APP_DISPLAY_NAME),
+        version=repr(VERSION),
+        bundle_identifier=repr("com.crankboy.crankboy-manager"),
+        icon=repr("src/assets/AppIcon.icns"),
+        strip=False,
+    ))
+    print(f"Generated {spec.name}")
 
-    if ICON_FILE_MACOS and os.path.exists(ICON_FILE_MACOS):
-        cmd.extend(["--icon", ICON_FILE_MACOS])
+    subprocess.run(["pyinstaller", "--clean", str(spec)], check=True)
+    spec.unlink()
 
-    cmd.append(MAIN_SCRIPT)
+    # Create ZIP archive
+    zip_name = f"{APP_NAME}-{VERSION}-macos.zip"
+    print(f"\nCreating {zip_name}...")
+    shutil.make_archive(
+        f"dist/{APP_NAME}-{VERSION}-macos",
+        'zip',
+        'dist',
+        APP_DISPLAY_NAME + '.app'
+    )
 
-    subprocess.run(cmd, check=True)
+    print(f"[OK] Build complete: dist/{APP_DISPLAY_NAME}.app")
+    print(f"[OK] Archive created: dist/{zip_name}")
 
     # Create ZIP archive
     zip_name = f"{APP_NAME}-{VERSION}-macos.zip"
@@ -301,7 +376,7 @@ Comment=Transfer Game Boy ROMs to CrankBoy
         if not flatpak:
             # Copy to root directory (AppImage spec)
             shutil.copy(ICON_FILE_LINUX, f"{appdir}/{app_id}.png")
-    
+
     if flatpak:
         return
 

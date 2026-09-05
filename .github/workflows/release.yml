@@ -260,14 +260,16 @@ jobs:
             COMPARE_URL="https://github.com/${{ github.repository }}/compare/${FIRST_COMMIT}...${{ github.ref_name }}"
           fi
 
-          echo "RELEASE_NOTES<<EOF" >> $GITHUB_ENV
-          echo "**Full Changelog**: ${COMPARE_URL}" >> $GITHUB_ENV
-          echo "" >> $GITHUB_ENV
-          echo "## Installation" >> $GITHUB_ENV
-          echo '- **Windows**: Extract and run `CrankBoyManager.exe`' >> $GITHUB_ENV
-          echo '- **macOS**: Extract and move `CrankBoy Manager.app` to Applications' >> $GITHUB_ENV
-          echo '- **Linux**: Make the AppImage executable and run it' >> $GITHUB_ENV
-          echo "EOF" >> $GITHUB_ENV
+          {
+            echo "**Full Changelog**: ${COMPARE_URL}"
+            echo ""
+            echo "## Installation"
+            cat <<'NOTES'
+          - **Windows**: Extract and run `CrankBoyManager.exe`
+          - **macOS**: Extract and move `CrankBoy Manager.app` to Applications
+          - **Linux**: Make the AppImage executable and run it
+          NOTES
+          } > release_notes.md
 
       - name: Rename Artifacts with Version
         run: |
@@ -310,5 +312,5 @@ jobs:
           gh release create ${{ github.ref_name }} \
             --draft \
             --title "Release ${{ github.ref_name }}" \
-            --notes "${{ env.RELEASE_NOTES }}" \
+            --notes-file release_notes.md \
             release_assets/*

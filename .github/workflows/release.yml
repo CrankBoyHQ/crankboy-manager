@@ -264,9 +264,9 @@ jobs:
           echo "**Full Changelog**: ${COMPARE_URL}" >> $GITHUB_ENV
           echo "" >> $GITHUB_ENV
           echo "## Installation" >> $GITHUB_ENV
-          echo "- **Windows**: Extract and run \`CrankBoyManager.exe\`" >> $GITHUB_ENV
-          echo "- **macOS**: Extract and move \`CrankBoy Manager.app\` to Applications" >> $GITHUB_ENV
-          echo "- **Linux**: Make the AppImage executable and run it" >> $GITHUB_ENV
+          echo '- **Windows**: Extract and run `CrankBoyManager.exe`' >> $GITHUB_ENV
+          echo '- **macOS**: Extract and move `CrankBoy Manager.app` to Applications' >> $GITHUB_ENV
+          echo '- **Linux**: Make the AppImage executable and run it' >> $GITHUB_ENV
           echo "EOF" >> $GITHUB_ENV
 
       - name: Rename Artifacts with Version

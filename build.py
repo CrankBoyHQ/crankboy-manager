@@ -10,7 +10,6 @@ import sys
 import shutil
 import subprocess
 import platform
-from datetime import datetime
 from pathlib import Path
 
 
@@ -325,46 +324,15 @@ Comment=Transfer Game Boy ROMs to CrankBoy
     with open(desktop_path, "w") as f:
         f.write(desktop)
 
-    # Create AppStream metadata
+    # Create AppStream metadata from the committed metainfo file (single
+    # source of truth). Flathub reads the changelog from the <releases>
+    # block here; AppImage also ships this file for consistency.
     metainfo_dir = f"{appdir}/share/metainfo" if flatpak else f"{appdir}/usr/share/metainfo"
     os.makedirs(metainfo_dir, exist_ok=True)
-    date_str = datetime.now().strftime("%Y-%m-%d")
-    appstream_xml = f"""<?xml version="1.0" encoding="UTF-8"?>
-<component type="desktop-application">
-  <id>{app_id}</id>
-  <metadata_license>CC0-1.0</metadata_license>
-  <project_license>MIT</project_license>
-  <name>{APP_DISPLAY_NAME}</name>
-  <summary>Transfer Game Boy ROMs to CrankBoy</summary>
-  <description>
-    <p>CrankBoy Manager is a desktop application for transferring Game Boy ROMs to your Playdate device running CrankBoy.</p>
-    <p>Features:</p>
-    <ul>
-      <li>Drag and drop ROM files</li>
-      <li>Support for .gb, .gbc, and .gbz files</li>
-      <li>ZIP archive support</li>
-      <li>Automatic cover art download</li>
-      <li>Batch transfer multiple ROMs</li>
-    </ul>
-  </description>
-  <launchable type="desktop-id">{app_id}.desktop</launchable>
-  <url type="homepage">https://crankboy.app</url>
-  <url type="vcs-browser">https://github.com/CrankBoyHQ/crankboy-manager</url>
-  <developer_name>CrankBoy Dev Team</developer_name>
-  <content_rating type="oars-1.1"/>
-  <screenshots>
-    <screenshot type="default">
-      <caption>The main window</caption>
-      <image>https://raw.githubusercontent.com/CrankBoyHQ/crankboy-manager/main/screenshot.png</image>
-    </screenshot>
-  </screenshots>
-  <releases>
-    <release version="{VERSION}" date="{date_str}"/>
-  </releases>
-</component>
-"""
-    with open(f"{metainfo_dir}/{app_id}.appdata.xml", "w") as f:
-        f.write(appstream_xml)
+    shutil.copy(
+        "app.crankboy.crankboy-manager.metainfo.xml",
+        f"{metainfo_dir}/{app_id}.metainfo.xml",
+    )
 
     # Copy the icon file
     if ICON_FILE_LINUX and os.path.exists(ICON_FILE_LINUX):

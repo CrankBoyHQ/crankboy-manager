@@ -1,0 +1,67 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<component type="desktop-application">
+  <id>app.crankboy.crankboy-manager</id>
+  <metadata_license>CC0-1.0</metadata_license>
+  <project_license>MIT</project_license>
+  <name>CrankBoy Manager</name>
+  <summary>Transfer Game Boy ROMs to CrankBoy</summary>
+  <description>
+    <p>
+      CrankBoy Manager is a desktop application for transferring Game Boy ROMs
+      to your Playdate device running CrankBoy.
+    </p>
+    <p>Features:</p>
+    <ul>
+      <li>Drag and drop ROM files</li>
+      <li>Support for .gb, .gbc, and .gbz files</li>
+      <li>ZIP archive support</li>
+      <li>Automatic cover art download</li>
+      <li>Batch transfer multiple ROMs</li>
+    </ul>
+  </description>
+  <launchable type="desktop-id">
+    app.crankboy.crankboy-manager.desktop
+  </launchable>
+  <url type="homepage">https://crankboy.app</url>
+  <url type="vcs-browser">https://github.com/CrankBoyHQ/crankboy-manager</url>
+  <developer_name>CrankBoy Dev Team</developer_name>
+  <content_rating type="oars-1.1" />
+  <screenshots>
+    <screenshot type="default">
+      <caption>The main window</caption>
+      <image>
+        https://raw.githubusercontent.com/CrankBoyHQ/crankboy-manager/main/screenshot.png
+      </image>
+    </screenshot>
+  </screenshots>
+  <releases>
+    <release version="1.1.1" date="2026-09-05">
+      <description>
+        <ul>
+          <li>Fix ROM drop-target text in dark mode</li>
+        </ul>
+      </description>
+    </release>
+    <release version="1.1.0" date="2026-09-03">
+      <description>
+        <ul>
+          <li>Custom Launcher support</li>
+        </ul>
+      </description>
+    </release>
+    <release version="1.0.1" date="2026-05-11">
+      <description>
+        <ul>
+          <li>Bug fixes</li>
+        </ul>
+      </description>
+    </release>
+    <release version="1.0.0" date="2026-04-09">
+      <description>
+        <ul>
+          <li>Initial release</li>
+        </ul>
+      </description>
+    </release>
+  </releases>
+</component>

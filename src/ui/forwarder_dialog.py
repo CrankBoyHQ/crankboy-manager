@@ -148,7 +148,8 @@ class _RomDropTarget(QLabel):
         )
         self.setStyleSheet(
             "QLabel { border: 2px dashed palette(mid); "
-            "border-radius: 6px; padding: 16px; color: palette(mid); }"
+            "border-radius: 6px; padding: 16px; "
+            "background: palette(base); color: palette(text); }"
         )
 
     def set_rom(self, path):

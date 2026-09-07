@@ -314,3 +314,11 @@ jobs:
             --title "Release ${{ github.ref_name }}" \
             --notes-file release_notes.md \
             release_assets/*
+
+      - name: Notify Homebrew Tap
+        uses: peter-evans/repository-dispatch@v3
+        with:
+          token: ${{ secrets.TAP_UPDATE_TOKEN }}
+          repo: CrankBoyHQ/homebrew-tap
+          event_type: update-cask
+          client_payload: '{"version": "${{ github.ref_name }}"}'

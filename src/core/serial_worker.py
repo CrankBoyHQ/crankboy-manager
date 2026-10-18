@@ -14,7 +14,6 @@ import serial
 from PyQt6.QtCore import QThread, pyqtSignal
 from src.core.transfer_engine import (
     send_command, read_response, parse_response,
-    get_file_info
 )
 from src.core.cover_downloader import download_cover
 

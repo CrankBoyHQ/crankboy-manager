@@ -264,35 +264,3 @@ def scan_for_crankboy(should_stop_callback=None):
         'message': "Playdate not connected - please connect and unlock your device"
     }
 
-
-def find_crankboy_port():
-    """Find CrankBoy port, testing cached port first.
-
-    Returns:
-        tuple: (port_name, version) or (None, None) if not found
-    """
-    result = scan_for_crankboy()
-    if result['status'] == 'connected_running':
-        for p in result['ports']:
-            if p.get('version'):
-                return p['device'], p['version']
-    return None, None
-
-
-def scan_ports():
-    """Scan and return only responsive CrankBoy devices.
-
-    Returns:
-        list: List of dicts with keys 'device', 'description', 'version'
-              Empty list if no CrankBoy found
-    """
-    result = scan_for_crankboy()
-    if result['status'] == 'connected_running':
-        return [p for p in result['ports'] if p.get('version')]
-    return []
-
-
-def clear_cached_port():
-    """Clear the cached CrankBoy port."""
-    global _last_crankboy_port
-    _last_crankboy_port = None

@@ -5,13 +5,9 @@ including GBZ compression and the ft protocol implementation.
 """
 
 import os
-import base64
 import zlib
 import gzip
-import io
 import urllib.parse
-
-from src.core.database import database as rom_database
 
 
 # Constants

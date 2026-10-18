@@ -1,10 +1,8 @@
 """Database module for looking up ROM information by CRC32."""
 
-import os
 import sys
 import json
 import gzip
-import zlib
 from pathlib import Path
 
 

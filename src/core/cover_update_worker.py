@@ -22,7 +22,6 @@ class CoverUpdateWorker(SerialWorker):
     """Reads the installed games on the device, downloads available cover
     art and transfers only covers (no ROM payloads)."""
 
-    games_listed = pyqtSignal(int)  # number of installed games found
     games_ready = pyqtSignal(list)  # parsed game records (list_only mode)
     cover_overall = pyqtSignal(int)  # overall update progress in percent
 
@@ -75,7 +74,6 @@ class CoverUpdateWorker(SerialWorker):
         count = self._read_games_header(ser)
         if count is None:
             return None
-        self.games_listed.emit(count)
 
         games, pending, done = [], None, 0
         deadline = time.time() + 30.0

@@ -3,7 +3,7 @@
 import os
 from PyQt6.QtWidgets import (
     QTableWidget, QTableWidgetItem, QAbstractItemView,
-    QPushButton, QHBoxLayout, QWidget, QLabel, QProgressBar, QHeaderView
+    QHBoxLayout, QWidget, QProgressBar, QHeaderView
 )
 from PyQt6.QtCore import Qt, pyqtSignal
 from PyQt6.QtDBus import QDBusConnection, QDBusMessage
@@ -212,6 +212,39 @@ class FileListWidget(QTableWidget):
 
         return len(extracted_files)
 
+    def _make_progress_bar(self):
+        """Build the default per-row progress bar (blue palette styling)."""
+        progress_bar = QProgressBar()
+        progress_bar.setRange(0, 100)
+        progress_bar.setValue(0)
+        progress_bar.setTextVisible(True)
+        progress_bar.setMaximumHeight(20)
+        progress_bar.setFormat("%p%")  # Show percentage
+        progress_bar.setStyleSheet("""
+            QProgressBar {
+                border: 1px solid palette(mid);
+                border-radius: 3px;
+                background: palette(base);
+                text-align: center;
+            }
+            QProgressBar::chunk {
+                background: palette(highlight);
+            }
+        """)
+        progress_bar.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        return progress_bar
+
+    def _add_progress_cell(self, row):
+        """Embed a fresh progress bar in the row's progress column."""
+        progress_widget = QWidget()
+        progress_layout = QHBoxLayout(progress_widget)
+        progress_layout.setContentsMargins(5, 2, 5, 2)
+        progress_bar = self._make_progress_bar()
+        progress_layout.addWidget(progress_bar)
+        self.setCellWidget(row, self.COL_PROGRESS, progress_widget)
+        # Store reference to progress bar
+        progress_widget.progress_bar = progress_bar
+
     def _add_files(self, filepaths):
         """Add files to the list."""
         added = []
@@ -294,31 +327,7 @@ class FileListWidget(QTableWidget):
                 self.setItem(row, self.COL_STATUS, status_item)
 
                 # Progress column - embed progress bar with % text
-                progress_widget = QWidget()
-                progress_layout = QHBoxLayout(progress_widget)
-                progress_layout.setContentsMargins(5, 2, 5, 2)
-                progress_bar = QProgressBar()
-                progress_bar.setRange(0, 100)
-                progress_bar.setValue(0)
-                progress_bar.setTextVisible(True)
-                progress_bar.setMaximumHeight(20)
-                progress_bar.setFormat("%p%")  # Show percentage
-                progress_bar.setStyleSheet("""
-                    QProgressBar {
-                        border: 1px solid palette(mid);
-                        border-radius: 3px;
-                        background: palette(base);
-                        text-align: center;
-                    }
-                    QProgressBar::chunk {
-                        background: palette(highlight);
-                    }
-                """)
-                progress_bar.setAlignment(Qt.AlignmentFlag.AlignCenter)
-                progress_layout.addWidget(progress_bar)
-                self.setCellWidget(row, self.COL_PROGRESS, progress_widget)
-                # Store reference to progress bar
-                progress_widget.progress_bar = progress_bar
+                self._add_progress_cell(row)
 
                 added.append(filepath)
                 existing_names.add(filename)  # Track to prevent duplicates within same batch
@@ -409,30 +418,7 @@ class FileListWidget(QTableWidget):
             status_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
             self.setItem(row, self.COL_STATUS, status_item)
 
-            progress_widget = QWidget()
-            progress_layout = QHBoxLayout(progress_widget)
-            progress_layout.setContentsMargins(5, 2, 5, 2)
-            progress_bar = QProgressBar()
-            progress_bar.setRange(0, 100)
-            progress_bar.setValue(0)
-            progress_bar.setTextVisible(True)
-            progress_bar.setMaximumHeight(20)
-            progress_bar.setFormat("%p%")
-            progress_bar.setStyleSheet("""
-                QProgressBar {
-                    border: 1px solid palette(mid);
-                    border-radius: 3px;
-                    background: palette(base);
-                    text-align: center;
-                }
-                QProgressBar::chunk {
-                    background: palette(highlight);
-                }
-            """)
-            progress_bar.setAlignment(Qt.AlignmentFlag.AlignCenter)
-            progress_layout.addWidget(progress_bar)
-            self.setCellWidget(row, self.COL_PROGRESS, progress_widget)
-            progress_widget.progress_bar = progress_bar
+            self._add_progress_cell(row)
 
             added.append(fp)
 

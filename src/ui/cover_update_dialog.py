@@ -156,9 +156,7 @@ class CoverUpdateDialog(QDialog):
     def _selected_crcs(self):
         crcs = set()
         for row in range(self._table.rowCount()):
-            box = self._table.cellWidget(row, self.COL_REPLACE)
-            if isinstance(box, QWidget):
-                box = box.findChild(QCheckBox)
+            box = self._row_checkbox(row)
             if box and box.isEnabled() and box.isChecked():
                 record = self._row_record(row)
                 if record and record.get("crc32"):
@@ -169,23 +167,26 @@ class CoverUpdateDialog(QDialog):
         game_item = self._table.item(row, self.COL_GAME)
         return game_item.data(Qt.ItemDataRole.UserRole) if game_item else None
 
+    def _row_checkbox(self, row):
+        """The replace checkbox embedded in the row's first column."""
+        box = self._table.cellWidget(row, self.COL_REPLACE)
+        if isinstance(box, QWidget):
+            return box.findChild(QCheckBox)
+        return box
+
     def _update_start_enabled(self):
         self._start_btn.setEnabled(len(self._selected_crcs()) > 0)
 
     def _select_all(self):
         for row in range(self._table.rowCount()):
-            box = self._table.cellWidget(row, self.COL_REPLACE)
-            if isinstance(box, QWidget):
-                box = box.findChild(QCheckBox)
+            box = self._row_checkbox(row)
             if box and box.isEnabled():
                 box.setChecked(True)
         self._update_start_enabled()
 
     def _select_missing(self):
         for row in range(self._table.rowCount()):
-            box = self._table.cellWidget(row, self.COL_REPLACE)
-            if isinstance(box, QWidget):
-                box = box.findChild(QCheckBox)
+            box = self._row_checkbox(row)
             if box and box.isEnabled():
                 record = self._row_record(row)
                 device_item = self._table.item(row, self.COL_DEVICE_COVER)
@@ -195,9 +196,7 @@ class CoverUpdateDialog(QDialog):
 
     def _select_none(self):
         for row in range(self._table.rowCount()):
-            box = self._table.cellWidget(row, self.COL_REPLACE)
-            if isinstance(box, QWidget):
-                box = box.findChild(QCheckBox)
+            box = self._row_checkbox(row)
             if box:
                 box.setChecked(False)
         self._update_start_enabled()
@@ -208,9 +207,7 @@ class CoverUpdateDialog(QDialog):
             return
         entries = []
         for row in range(self._table.rowCount()):
-            box = self._table.cellWidget(row, self.COL_REPLACE)
-            if isinstance(box, QWidget):
-                box = box.findChild(QCheckBox)
+            box = self._row_checkbox(row)
             if box and box.isEnabled() and box.isChecked():
                 record = self._row_record(row)
                 if record and record.get("crc32"):

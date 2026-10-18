@@ -1,28 +1,25 @@
 """Main window for CrankBoy Manager."""
 
-import os
 import sys
 import time
 from PyQt6.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
     QLabel, QPushButton, QComboBox, QCheckBox,
     QFileDialog, QProgressBar, QTextEdit, QMessageBox,
-    QFrame, QGroupBox, QApplication
+    QGroupBox, QApplication
 )
 from PyQt6.QtCore import Qt, QTimer, QPropertyAnimation, QAbstractAnimation, pyqtSignal
-from PyQt6.QtGui import QFont, QIcon
+from PyQt6.QtGui import QIcon
 
 from src.ui.file_list_widget import FileListWidget
 from src.ui.forwarder_dialog import ForwarderDialog
 from src.core.serial_worker import SerialWorker
 from src.core.cover_update_worker import CoverUpdateWorker
 from src.ui.cover_update_dialog import CoverUpdateDialog
-from src.core.forwarder_worker import MIN_CRANKBOY_VERSION
-from src.core.port_scanner import scan_for_crankboy
 from src.core.port_scanner_worker import PortScannerWorker
 from src.core.cover_download_worker import CoverDownloadWorker
 from src.core.transfer_engine import send_command, read_response, version_at_least
-from src.core.constants import FileStatus, TransferButtonState, ArtStatus, ART_STATUS_LEGEND
+from src.core.constants import FileStatus, TransferButtonState, ArtStatus
 from src.ui.spinner import Spinner
 from src.version import VERSION
 
@@ -270,7 +267,6 @@ class MainWindow(QMainWindow):
     def _set_window_icon(self):
         """Set the window icon from the bundled icon file."""
         from pathlib import Path
-        from PyQt6.QtGui import QIcon
 
         # All icons are in src/assets/
         icon_dir = Path(__file__).parent.parent / "assets"

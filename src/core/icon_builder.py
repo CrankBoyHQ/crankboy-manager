@@ -543,7 +543,7 @@ def _dither_pil(img):
     CrankBoy's brightness-curve fit).
     """
     from PIL import Image
-    from src.core.pdi import dither, _stride_for  # noqa: F401
+    from src.core.pdi import dither
     if img.mode != "RGBA":
         img = img.convert("RGBA")
     w, h = img.size

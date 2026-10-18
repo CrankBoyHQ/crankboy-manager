@@ -122,19 +122,6 @@ def _crankboy_bin_candidates(mount_path, crankboy_pdx_path, crankboy_bundle_id):
     return candidates
 
 
-def _crankboy_bin_on_disk(mount_path, crankboy_pdx_path, crankboy_bundle_id):
-    """Locate crankboy.bin on a mounted PLAYDATE data disk.
-
-    Returns the filesystem path or None.
-    """
-    for c in _crankboy_bin_candidates(
-        mount_path, crankboy_pdx_path, crankboy_bundle_id
-    ):
-        if os.path.isfile(c):
-            return c
-    return None
-
-
 class ForwarderWorker(QThread):
     """Builds and installs CrankBoy forwarders for a list of ROMs."""
 

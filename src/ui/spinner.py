@@ -2,7 +2,7 @@
 
 from PyQt6.QtWidgets import QWidget
 from PyQt6.QtCore import Qt, QTimer, QRectF
-from PyQt6.QtGui import QPainter, QPen, QColor, QBrush
+from PyQt6.QtGui import QPainter, QPen, QColor
 
 class Spinner(QWidget):
     """Circular, endlessly animated progress indicator."""

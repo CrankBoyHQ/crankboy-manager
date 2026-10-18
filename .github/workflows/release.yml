@@ -319,6 +319,6 @@ jobs:
         uses: peter-evans/repository-dispatch@v3
         with:
           token: ${{ secrets.TAP_UPDATE_TOKEN }}
-          repo: CrankBoyHQ/homebrew-tap
-          event_type: update-cask
-          client_payload: '{"version": "${{ github.ref_name }}"}'
+          repository: CrankBoyHQ/homebrew-tap
+          event-type: update-cask
+          client-payload: '{"version": "${{ github.ref_name }}"}'

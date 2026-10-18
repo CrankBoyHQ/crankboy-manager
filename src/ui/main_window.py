@@ -1387,6 +1387,11 @@ class MainWindow(QMainWindow):
 
     def _update_transfer_button_state(self):
         """Update transfer button text and enabled state based on current state."""
+        self.update_covers_btn.setEnabled(
+            self._crankboy_connected
+            and self._device_wants_cvi()
+            and not self._serial_port_busy()
+        )
         # cover update running: the transfer button is its Stop button
         if self._cover_update_worker and self._cover_update_worker.isRunning():
             self.transfer_btn.setText(TransferButtonState.STOP.value)
@@ -1404,12 +1409,6 @@ class MainWindow(QMainWindow):
             self.transfer_btn.setText(TransferButtonState.RESUME.value)
             self.transfer_btn.setEnabled(self._crankboy_connected)
             return
-        self.update_covers_btn.setEnabled(
-            self._crankboy_connected
-            and self._device_wants_cvi()
-            and (self._cover_update_worker is None or not self._cover_update_worker.isRunning())
-            and (self.worker is None or not self.worker.isRunning())
-        )
         # If a transfer is already running, the button should be enabled (it's the "Stop" button)
         if self.worker and self.worker.isRunning():
             self.transfer_btn.setText(TransferButtonState.STOP.value)
@@ -1438,8 +1437,9 @@ class MainWindow(QMainWindow):
 
     def _update_clear_button_state(self):
         """Update the enabled state of the clear button."""
-        # If a transfer is running, it stays disabled
-        if self.worker and self.worker.isRunning():
+        # While any serial session (running or draining) is active, the
+        # button stays disabled
+        if self._serial_port_busy():
             self.clear_btn.setEnabled(False)
             return
 

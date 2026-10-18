@@ -26,8 +26,10 @@ def _get_db_dir() -> Path:
 DB_MASK = 0xFC  # Should match create_rom_list.py
 DB_DIR = _get_db_dir()
 
-# Cover download configuration
+# Cover download configuration (Combined_Boxarts = legacy pdi set that
+# CrankBoy < 3 reads; Combined_Boxarts_LZ = cvi containers for 3.0+)
 COVERS_BASE_URL = "https://raw.githubusercontent.com/CrankBoyHQ/crankboy-covers/refs/heads/main/Combined_Boxarts"
+COVERS_LZ_BASE_URL = "https://raw.githubusercontent.com/CrankBoyHQ/crankboy-covers/refs/heads/main/Combined_Boxarts_LZ"
 
 
 class RomDatabase:
@@ -95,11 +97,13 @@ class RomDatabase:
 
         return encode_cover_filename(long_name)
 
-    def get_cover_url(self, crc32: int) -> str | None:
+    def get_cover_url(self, crc32: int, cvi: bool = False) -> str | None:
         """Get the full URL for cover art download.
 
         Args:
             crc32: The CRC32 of the ROM
+            cvi: True for the CrankBoy 3+ cvi container (.cvi), False for
+                the legacy pdi file
 
         Returns:
             The full URL to download the cover, or None if not found
@@ -108,13 +112,16 @@ class RomDatabase:
         if not cover_filename:
             return None
 
-        return f"{COVERS_BASE_URL}/{cover_filename}.pdi"
+        base = COVERS_LZ_BASE_URL if cvi else COVERS_BASE_URL
+        return f"{base}/{cover_filename}{'.cvi' if cvi else '.pdi'}"
 
-    def get_cover_info(self, crc32: int) -> dict | None:
+    def get_cover_info(self, crc32: int, cvi: bool = False) -> dict | None:
         """Get cover information for a ROM by CRC32.
 
         Args:
             crc32: The CRC32 of the ROM
+            cvi: True for the CrankBoy 3+ cvi container (.cvi), False for
+                the legacy pdi file
 
         Returns:
             Dict with 'url' and 'filename' keys, or None if not found
@@ -123,13 +130,13 @@ class RomDatabase:
         if not cover_filename:
             return None
 
-        cover_url = self.get_cover_url(crc32)
+        cover_url = self.get_cover_url(crc32, cvi=cvi)
         if not cover_url:
             return None
 
         return {
             'url': cover_url,
-            'filename': f"{cover_filename}.pdi"
+            'filename': f"{cover_filename}{'.cvi' if cvi else '.pdi'}"
         }
 
 

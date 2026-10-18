@@ -6,6 +6,7 @@ in the background, allowing the UI to remain responsive.
 
 import time
 import io
+import os
 import base64
 import zlib
 import urllib.parse
@@ -15,6 +16,7 @@ from src.core.transfer_engine import (
     send_command, read_response, parse_response,
     get_file_info
 )
+from src.core.cover_downloader import download_cover
 
 # Transfer tuning constants
 MIN_ACK_TIMEOUT = 0.5   # Lower bound for adaptive chunk retransmit timeout
@@ -60,6 +62,7 @@ class SerialWorker(QThread):
         self.restart = self.options.get('restart', False)
         self.use_sft = self.options.get('use_sft', False)
         self.download_cover_art = self.options.get('download_cover_art', True)
+        self.use_cvi = self.options.get('use_cvi', False)
     
     def _log(self, message):
         """Log message only if verbose mode is enabled."""
@@ -90,6 +93,12 @@ class SerialWorker(QThread):
                 filename = file_info['filename']
                 rom_size = file_info['gbz_size']
                 cover_data = file_info.get('cover_data') if self.download_cover_art else None
+                cover_filename = file_info.get('cover_filename')
+                # the background prefetch may have picked the other format
+                # (its decision predates the device); align with the target
+                cover_data, cover_filename = self._match_cover_format(
+                    file_info, cover_data, cover_filename
+                )
                 cover_size = len(cover_data) if cover_data else 0
                 combined_total = rom_size + cover_size
 
@@ -107,7 +116,6 @@ class SerialWorker(QThread):
                 any_successful = True
 
                 # Transfer cover art if available
-                cover_filename = file_info.get('cover_filename')
                 if cover_data and cover_filename:
                     cover_success, cover_message = self._transfer_cover(ser, cover_data, cover_filename, combined_total, rom_size)
                     if not cover_success:
@@ -459,6 +467,36 @@ class SerialWorker(QThread):
         cmd = f"ft:c:{seq_hex}:{crc16_hex}:{b64_data}"
         send_command(ser, cmd)
     
+    def _match_cover_format(self, file_info, cover_data, cover_filename):
+        """Align a prefetched cover with the target device's format (CrankBoy
+        3+ reads cvi, earlier versions pdi). Returns the (possibly refreshed)
+        (data, filename) pair; on refresh failure the original pair is kept.
+        """
+        if not cover_data or not cover_filename:
+            return cover_data, cover_filename
+        wanted_ext = ".cvi" if self.use_cvi else ".pdi"
+        if os.path.splitext(cover_filename)[1] == wanted_ext:
+            return cover_data, cover_filename
+        crc = file_info.get('original_crc')
+        if not crc:
+            self.log_message.emit(
+                f"  Cover format mismatch for {file_info['filename']}; sending what we have"
+            )
+            return cover_data, cover_filename
+        try:
+            new_data = download_cover(crc, cvi=self.use_cvi)
+        except Exception:
+            new_data = None
+        if not new_data:
+            self.log_message.emit(
+                f"  Cover format mismatch for {file_info['filename']}; sending what we have"
+            )
+            return cover_data, cover_filename
+        new_filename = f"{os.path.splitext(cover_filename)[0]}{wanted_ext}"
+        file_info['cover_data'] = new_data
+        file_info['cover_filename'] = new_filename
+        return new_data, new_filename
+
     def _transfer_cover(self, ser, cover_data, cover_filename, combined_total, offset):
         """Transfer cover art to the covers directory.
 
@@ -472,8 +510,8 @@ class SerialWorker(QThread):
         self._log(f"Transferring cover: {cover_filename}")
 
         try:
-            # Send begin command
-            # The C code will automatically save .pdi files to the covers directory
+            # The C code stores the cover stream in covers/ under the given
+            # name + extension (cvi for CrankBoy 3+, pdi for older builds)
             encoded_filename = urllib.parse.quote(cover_filename, safe='')
             crc_hex = f"{cover_crc:08X}"
 

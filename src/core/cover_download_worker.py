@@ -18,14 +18,16 @@ class CoverDownloadWorker(QThread):
     cover_completed = pyqtSignal(str, bool, str)  # rom_filename, success, message
     all_completed = pyqtSignal()  # All downloads completed (queue empty)
 
-    def __init__(self, max_concurrent=3):
+    def __init__(self, max_concurrent=3, use_cvi=False):
         """Initialize worker with empty queue.
 
         Args:
             max_concurrent: Maximum number of parallel downloads
+            use_cvi: Fetch cvi containers (CrankBoy 3+) instead of pdi
         """
         super().__init__()
         self.max_concurrent = max_concurrent
+        self.use_cvi = use_cvi
         self._is_running = True
         self._completed_count = 0
         self._queue = queue.Queue()
@@ -80,7 +82,7 @@ class CoverDownloadWorker(QThread):
             return False, "No CRC available"
 
         # Get cover info from database
-        cover_info = rom_database.get_cover_info(crc)
+        cover_info = rom_database.get_cover_info(crc, cvi=self.use_cvi)
         if not cover_info:
             with self._lock:
                 self._active_count -= 1
@@ -104,6 +106,7 @@ class CoverDownloadWorker(QThread):
                 # Pass cancellation lambda to allow downloader to abort mid-stream
                 cover_data = download_cover(
                     crc,
+                    cvi=self.use_cvi,
                     progress_callback=lambda curr, total, rf=rom_filename: self.cover_progress.emit(rf, curr, total),
                     is_running_func=lambda: self._is_running
                 )
@@ -113,7 +116,7 @@ class CoverDownloadWorker(QThread):
                     file_info['cover_data'] = cover_data
                     # Construct cover filename from ROM basename
                     rom_basename = os.path.splitext(rom_filename)[0]
-                    file_info['cover_filename'] = f"{rom_basename}.pdi"
+                    file_info['cover_filename'] = f"{rom_basename}{os.path.splitext(cover_info['filename'])[1]}"
                     file_info['cover_url'] = cover_info['url']
                     success = True
                     last_error = f"Downloaded {len(cover_data)} bytes"

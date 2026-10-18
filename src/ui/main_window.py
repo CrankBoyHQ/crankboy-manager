@@ -15,6 +15,8 @@ from PyQt6.QtGui import QFont, QIcon
 from src.ui.file_list_widget import FileListWidget
 from src.ui.forwarder_dialog import ForwarderDialog
 from src.core.serial_worker import SerialWorker
+from src.core.cover_update_worker import CoverUpdateWorker
+from src.ui.cover_update_dialog import CoverUpdateDialog
 from src.core.forwarder_worker import MIN_CRANKBOY_VERSION
 from src.core.port_scanner import scan_for_crankboy
 from src.core.port_scanner_worker import PortScannerWorker
@@ -37,6 +39,12 @@ class MainWindow(QMainWindow):
         self.settings = settings
         self.worker = None
         self._cover_download_worker = None
+        self._cover_update_worker = None
+        self._cover_scan_worker = None
+        self._cover_entries = None
+        self._cover_done_crcs = set()
+        self._cover_update_stopped = False
+        self._draining_workers = []  # stopped workers whose port may still be busy
         self._transfer_stopped = False  # Track if transfer was stopped by user
         self._last_stop_time = 0  # Track when user last stopped transfer
         self._crankboy_connected = False  # Selected port has a running CrankBoy
@@ -161,6 +169,12 @@ class MainWindow(QMainWindow):
         )
         list_header.addWidget(self.forwarder_btn)
 
+        self.update_covers_btn = QPushButton("Update covers")
+        self.update_covers_btn.setToolTip(
+            "Refresh cover art for games installed on the device"
+        )
+        list_header.addWidget(self.update_covers_btn)
+
         layout.addLayout(list_header)
 
         self.file_list = FileListWidget()
@@ -241,6 +255,7 @@ class MainWindow(QMainWindow):
         self.add_btn.clicked.connect(self._add_files_dialog)
         self.remove_btn.clicked.connect(self._remove_selected_files)
         self.transfer_btn.clicked.connect(self._on_transfer_button_clicked)
+        self.update_covers_btn.clicked.connect(self._on_update_covers_clicked)
         self.forwarder_btn.clicked.connect(self._on_create_forwarder_clicked)
         self.clear_btn.clicked.connect(self._clear_completed)
 
@@ -287,6 +302,10 @@ class MainWindow(QMainWindow):
             return
         if self._scanner_worker and self._scanner_worker.isRunning():
             return
+        # Never probe the port while a serial session (cover listing/update
+        # or a just-paused worker) may still be using it
+        if self._serial_port_busy():
+            return
 
         # Show scanning indicator if no CrankBoy is currently connected
         if not self._crankboy_connected:
@@ -297,9 +316,10 @@ class MainWindow(QMainWindow):
 
     def _on_scan_complete(self, result):
         """Handle scan completion from worker thread."""
-        # Skip UI updates if a transfer is currently in progress
-        # (scan might have completed after transfer started)
-        if self.worker and self.worker.isRunning():
+        # Skip UI updates while any serial session is active or draining
+        # (a scan started before a pause/transfer probes a busy port and
+        # would corrupt the banner with a bogus "not connected" state)
+        if self._serial_port_busy():
             return
 
         status = result['status']
@@ -383,6 +403,14 @@ class MainWindow(QMainWindow):
         if version:
             return f"{device} (CrankBoy {version})"
         return device
+
+    def _device_wants_cvi(self):
+        """True unless the current target device is known to predate
+        CrankBoy 3 (which reads pdi instead of cvi containers)."""
+        device = self.port_combo.currentData()
+        info = self._port_info.get(device) if device else None
+        version = info.get('version') if info else None
+        return True if not version else version_at_least(version, (3, 0, 0))
 
     def _refresh_crankboy_connected(self):
         """Recompute _crankboy_connected from the currently selected port.
@@ -586,7 +614,17 @@ class MainWindow(QMainWindow):
 
         # Create worker lazily if needed
         if self._cover_download_worker is None:
-            self._cover_download_worker = CoverDownloadWorker(max_concurrent=20)
+            # cvi containers are the default (CrankBoy 3+); prefetch steps
+            # down to pdi only when a connected device is known to predate
+            # 3.0. If the device connects later, the transfer step aligns
+            # the format per file.
+            device = self.port_combo.currentData()
+            info = self._port_info.get(device) if device else None
+            version = info.get('version') if info else None
+            use_cvi = True if not version else version_at_least(version, (3, 0, 0))
+            if not use_cvi:
+                self._log("  Downloading covers as pdi (CrankBoy <3 device detected)")
+            self._cover_download_worker = CoverDownloadWorker(max_concurrent=20, use_cvi=use_cvi)
             self._cover_download_worker.cover_started.connect(self._on_cover_download_started)
             self._cover_download_worker.cover_completed.connect(self._on_cover_download_completed)
             self._cover_download_worker.all_completed.connect(self._on_all_covers_completed)
@@ -696,6 +734,8 @@ class MainWindow(QMainWindow):
                     # Get existing file_info (which has cover data from background download)
                     file_info = self.file_list.files_info.get(filepath)
                     if file_info:
+                        if file_info.get('is_device_entry'):
+                            continue
                         # Update keep_compressed setting in the existing file_info
                         if keep_compressed:
                             # Keep as GBZ on device - don't provide original info
@@ -809,6 +849,7 @@ class MainWindow(QMainWindow):
             'restart': self.restart_cb.isChecked(),
             'use_sft': True,  # We enabled SFT overlay before starting
             'download_cover_art': self.download_cover_cb.isChecked(),
+            'use_cvi': self._device_wants_cvi(),
         }
 
         self.worker = SerialWorker(port, files, options)
@@ -844,17 +885,20 @@ class MainWindow(QMainWindow):
         self._update_transfer_button_state()
 
     def _stop_transfer(self):
-        """Stop the current transfer."""
+        """Pause the running transfer; the queue stays resumable."""
         import time
         if self.worker:
-            self._log("Stopping transfer...")
+            self._log("Pausing transfer...")
             self._transfer_stopped = True
             self._last_stop_time = time.time()
-            self.worker.stop()
-            self.worker.wait(2000)
-            self.worker.deleteLater()
+            worker = self.worker
             self.worker = None
-        
+            # the thread can need a few seconds (serial read timeouts) to
+            # notice the stop; never destroy it while it is still running
+            worker.finished.connect(self._on_drain_finished)
+            self._draining_workers.append(worker)
+            worker.stop()
+
         # Mark all non-done files as Pending for resume
         for filepath in self.file_list.filepaths:
             row = self.file_list.filepaths.index(filepath)
@@ -869,13 +913,39 @@ class MainWindow(QMainWindow):
         # Update button state to show Resume
         self._update_transfer_button_state()
 
+    def _on_drain_finished(self):
+        """A paused worker fully exited; its serial port is free again."""
+        worker = self.sender()
+        if worker in self._draining_workers:
+            self._draining_workers.remove(worker)
+        worker.deleteLater()
+
+    def _serial_port_busy(self):
+        """True while any serial session (running or draining) holds the port."""
+        if self.worker and self.worker.isRunning():
+            return True
+        if self._cover_update_worker and self._cover_update_worker.isRunning():
+            return True
+        if self._cover_scan_worker and self._cover_scan_worker.isRunning():
+            return True
+        return any(w.isRunning() for w in self._draining_workers)
+
     def _on_transfer_button_clicked(self):
         """Handle transfer button click - start or stop based on current state."""
         if self.worker and self.worker.isRunning():
             # Transfer is running, stop it
             self._stop_transfer()
+        elif self._cover_update_worker and self._cover_update_worker.isRunning():
+            self._stop_cover_update()
+        elif (self._cover_entries and not self._has_rom_files_pending()
+                and (self._has_failed_files() or self._has_pending_cover_rows())):
+            # retry/resume the last cover selection (only not-Done rows)
+            self._start_cover_update(self._cover_entries, skip_done=True)
         else:
             # No transfer running, start one
+            if self._serial_port_busy():
+                self._log("Serial port is still busy, try again in a moment")
+                return
             self._start_transfer()
 
     def _on_create_forwarder_clicked(self):
@@ -930,11 +1000,13 @@ class MainWindow(QMainWindow):
             progress = int((bytes_sent / total_bytes) * 100)
             self.file_list.set_file_progress(current_file, bytes_sent, total_bytes)
 
-        # Update overall progress
+        # Update overall progress (bytes-based; cover sessions keep the
+        # count-based value the worker emits)
         self._current_file_bytes = bytes_sent
         total_sent = self._bytes_completed + self._current_file_bytes
-        overall_progress = int((total_sent / self._total_bytes_all_files) * 100) if self._total_bytes_all_files > 0 else 0
-        self.overall_progress.setValue(overall_progress)
+        if self._total_bytes_all_files > 0:
+            overall_progress = int((total_sent / self._total_bytes_all_files) * 100)
+            self.overall_progress.setValue(overall_progress)
 
     def _on_file_completed(self, filename, success, message):
         """Handle file transfer completion."""
@@ -944,9 +1016,16 @@ class MainWindow(QMainWindow):
             if is_user_stopped:
                 self.file_list.set_file_status(filepath, FileStatus.PENDING)
                 self.file_list.set_file_progress(filepath, 0, 100)
+            elif message.startswith("No cover"):
+                # cover lookup/download found nothing to send: not an error
+                self.file_list.set_file_status(filepath, FileStatus.UNAVAILABLE)
             else:
                 self.file_list.set_file_status(filepath, FileStatus.DONE if success else FileStatus.FAILED)
                 self.file_list.set_file_progress(filepath, 100, 100, is_error=not success)
+                if success:
+                    info = self.file_list.files_info.get(filepath)
+                    if info and info.get('is_device_entry') and info.get('original_crc'):
+                        self._cover_done_crcs.add(info['original_crc'])
             self._update_clear_button_state()
 
         # Add to completed bytes for overall progress
@@ -981,6 +1060,134 @@ class MainWindow(QMainWindow):
     def _on_error(self, filename, error):
         """Handle transfer error."""
         self._log(f"Error: {error}")
+
+    def _on_update_covers_clicked(self):
+        """Open the selective cover-update dialog."""
+        if self._cover_update_worker and self._cover_update_worker.isRunning():
+            return
+        if self._serial_port_busy():
+            self._log("Serial port is still busy, try again in a moment")
+            return
+        if self.worker and self.worker.isRunning():
+            self._log("Cannot update covers while a transfer is running")
+            return
+        device = self.port_combo.currentData()
+        options = {
+            'verbose': self.verbose_cb.isChecked(),
+            'use_sft': False,
+            'download_cover_art': True,
+            'use_cvi': self._device_wants_cvi(),
+        }
+        dialog = CoverUpdateDialog(self, device, options, log_callback=self._log)
+        dialog.start_requested.connect(self._start_cover_update)
+        dialog.scan_finished.connect(self._on_cover_scan_finished)
+        # track from the start so port guards cover the listing phase
+        self._cover_scan_worker = dialog.scan_worker()
+        self._scan_timer.stop()
+        dialog.exec()
+        # a canceled scan keeps draining for a few seconds; track it so
+        # transfers wait until the port is free again
+        if dialog.scan_worker() and dialog.scan_worker().isRunning():
+            self._cover_scan_worker = dialog.scan_worker()
+        if not self._cover_update_worker:
+            self._scan_timer.start(3000)
+
+    def _on_cover_scan_finished(self):
+        """Scan worker exited; the serial port is free again."""
+        self._cover_scan_worker = None
+
+    def _start_cover_update(self, entries, skip_done=False):
+        """Transfer covers for the dialog-selected games, then refresh.
+
+        entries: dicts with 'crc32' (int) + 'rom_name' (device ROM name).
+        Selected games appear as rows in the transfer queue and stream
+        per-file progress through the standard handlers. skip_done
+        (resume/retry) re-runs only rows that are not Done.
+        """
+        self._cover_update_stopped = False
+        if skip_done:
+            # resume: only what has not succeeded yet (survives row removal
+            # by Clear Completed)
+            entries = [e for e in entries if e['crc32'] not in self._cover_done_crcs]
+            if not entries:
+                self._log("Nothing left to update")
+                return
+        else:
+            self._cover_done_crcs = set()  # fresh selection: re-transfer all
+        if self._serial_port_busy():
+            self._log("Serial port is still busy, try again in a moment")
+            return
+        device = self.port_combo.currentData()
+
+        self.file_list.add_device_cover_entries(
+            [
+                {
+                    'device_filepath': f"device:{e['rom_name']}",
+                    'rom_name': e['rom_name'],
+                    'crc32': e['crc32'],
+                }
+                for e in entries
+            ]
+        )
+        self._total_bytes_all_files = 0  # overall bar is count-based for covers
+        self._files_to_transfer = []
+        self._current_file_index = 0
+        self._bytes_completed = 0
+        self._current_file_bytes = 0
+        self._current_file_total = 0
+        self._set_controls_enabled(False)
+        self._scan_timer.stop()
+
+        options = {
+            'verbose': self.verbose_cb.isChecked(),
+            'use_sft': False,
+            'download_cover_art': True,
+            'use_cvi': self._device_wants_cvi(),
+        }
+        self._cover_update_worker = CoverUpdateWorker(
+            device, options, selected_crcs={e['crc32'] for e in entries}
+        )
+        self._cover_entries = entries
+        self._cover_update_worker.log_message.connect(self._log)
+        self._cover_update_worker.error_occurred.connect(self._on_error)
+        self._cover_update_worker.file_started.connect(self._on_file_started)
+        self._cover_update_worker.file_progress.connect(self._on_file_progress)
+        self._cover_update_worker.file_completed.connect(self._on_file_completed)
+        self._cover_update_worker.cover_started.connect(self._on_cover_started)
+        self._cover_update_worker.cover_completed.connect(self._on_cover_completed)
+        self._cover_update_worker.cover_overall.connect(self.overall_progress.setValue)
+        self._cover_update_worker.all_completed.connect(self._on_update_covers_completed)
+        self._cover_update_worker.start()
+        self._update_transfer_button_state()
+
+    def _stop_cover_update(self):
+        """Pause the running cover update (the transfer button's Pause)."""
+        self._log("Pausing cover update...")
+        self._cover_update_stopped = True
+        worker = self._cover_update_worker
+        self._cover_update_worker = None
+        worker.finished.connect(self._on_drain_finished)
+        self._draining_workers.append(worker)
+        worker.stop()
+
+    def _on_update_covers_completed(self, ok):
+        self._set_controls_enabled(True)
+        self._scan_timer.start(3000)
+        if ok:
+            self._log("Cover update finished")
+            self.overall_progress.setValue(100)
+        elif self._cover_update_stopped or self._has_pending_cover_rows():
+            self._log("Cover update stopped")
+        else:
+            self._log("Cover update FAILED")
+        # thread may still be a few statements from run() returning; defer
+        # its destruction until it has actually finished
+        worker = self._cover_update_worker
+        self._cover_update_worker = None
+        if worker:
+            worker.finished.connect(self._on_drain_finished)
+            self._draining_workers.append(worker)
+        self._update_transfer_button_state()
 
     def _on_all_completed(self, all_successful):
         """Handle all transfers completing."""
@@ -1037,10 +1244,13 @@ class MainWindow(QMainWindow):
                     }
                 """)
 
-        # Use deleteLater to safely cleanup the thread after it finishes
-        if self.worker:
-            self.worker.deleteLater()
+        # thread may still be a few statements from run() returning; defer
+        # its destruction until it has actually finished
+        worker = self.worker
         self.worker = None
+        if worker:
+            worker.finished.connect(self._on_drain_finished)
+            self._draining_workers.append(worker)
 
         # Reset transfer tracking and update label
         self._files_to_transfer = []
@@ -1057,11 +1267,23 @@ class MainWindow(QMainWindow):
         self.log_view.append(message)
 
     def _find_filepath_by_name(self, filename):
-        """Find filepath in file list by filename."""
+        """Find filepath in file list by filename.
+
+        A local file and a device cover row can share a basename; prefer
+        the row belonging to whichever worker is currently emitting.
+        """
+        prefer_device = bool(
+            self._cover_update_worker and self._cover_update_worker.isRunning()
+        )
+        fallback = None
         for filepath, info in self.file_list.files_info.items():
-            if info['filename'] == filename:
+            if info['filename'] != filename:
+                continue
+            if bool(info.get('is_device_entry')) == prefer_device:
                 return filepath
-        return None
+            if fallback is None:
+                fallback = filepath
+        return fallback
 
     def _get_current_transferring_file(self):
         """Get the filepath of the file currently being transferred."""
@@ -1129,6 +1351,36 @@ class MainWindow(QMainWindow):
         # Add padding for margins
         self.transfer_btn.setMinimumWidth(max_width + 20)
 
+    def _has_rom_files_pending(self):
+        """ROM rows (device cover rows excluded) that are not Done."""
+        for row in range(self.file_list.rowCount()):
+            status_item = self.file_list.item(row, self.file_list.COL_STATUS)
+            if not status_item:
+                continue
+            status = status_item.data(Qt.ItemDataRole.UserRole)
+            if status == FileStatus.DONE:
+                continue
+            filepath = self.file_list.filepaths[row]
+            info = self.file_list.files_info.get(filepath)
+            if info and not info.get('is_device_entry'):
+                return True
+        return False
+
+    def _has_pending_cover_rows(self):
+        """True when any device cover row is still not Done."""
+        for row in range(self.file_list.rowCount()):
+            filepath = self.file_list.filepaths[row]
+            info = self.file_list.files_info.get(filepath)
+            if not info or not info.get('is_device_entry'):
+                continue
+            status_item = self.file_list.item(row, self.file_list.COL_STATUS)
+            if status_item and status_item.data(Qt.ItemDataRole.UserRole) not in (
+                FileStatus.DONE,
+                FileStatus.UNAVAILABLE,
+            ):
+                return True
+        return False
+
     def _has_failed_files(self):
         """Check if there are any failed files in the list."""
         for row in range(self.file_list.rowCount()):
@@ -1139,6 +1391,29 @@ class MainWindow(QMainWindow):
 
     def _update_transfer_button_state(self):
         """Update transfer button text and enabled state based on current state."""
+        # cover update running: the transfer button is its Stop button
+        if self._cover_update_worker and self._cover_update_worker.isRunning():
+            self.transfer_btn.setText(TransferButtonState.STOP.value)
+            self.transfer_btn.setEnabled(True)
+            return
+        # failed cover session + no ROM work pending: retry the last selection
+        if (self._cover_entries and self._has_failed_files()
+                and not self._has_rom_files_pending()):
+            self.transfer_btn.setText(TransferButtonState.RETRY.value)
+            self.transfer_btn.setEnabled(self._crankboy_connected)
+            return
+        # stopped cover session with rows left: offer resume
+        if (self._cover_entries and not self._has_rom_files_pending()
+                and self._has_pending_cover_rows()):
+            self.transfer_btn.setText(TransferButtonState.RESUME.value)
+            self.transfer_btn.setEnabled(self._crankboy_connected)
+            return
+        self.update_covers_btn.setEnabled(
+            self._crankboy_connected
+            and self._device_wants_cvi()
+            and (self._cover_update_worker is None or not self._cover_update_worker.isRunning())
+            and (self.worker is None or not self.worker.isRunning())
+        )
         # If a transfer is already running, the button should be enabled (it's the "Stop" button)
         if self.worker and self.worker.isRunning():
             self.transfer_btn.setText(TransferButtonState.STOP.value)
@@ -1175,7 +1450,10 @@ class MainWindow(QMainWindow):
         has_done = False
         for row in range(self.file_list.rowCount()):
             status_item = self.file_list.item(row, self.file_list.COL_STATUS)
-            if status_item and status_item.data(Qt.ItemDataRole.UserRole) == FileStatus.DONE:
+            if status_item and status_item.data(Qt.ItemDataRole.UserRole) in (
+                FileStatus.DONE,
+                FileStatus.UNAVAILABLE,
+            ):
                 has_done = True
                 break
         self.clear_btn.setEnabled(has_done)
@@ -1200,10 +1478,19 @@ class MainWindow(QMainWindow):
         """Handle window close."""
         # Check if any operations are in progress
         is_transferring = self.worker and self.worker.isRunning()
+        is_cover_updating = (self._cover_update_worker
+                             and self._cover_update_worker.isRunning())
+        is_cover_scanning = (self._cover_scan_worker
+                             and self._cover_scan_worker.isRunning())
         is_downloading = self._cover_download_worker and self._cover_download_worker.has_work()
 
-        if is_transferring or is_downloading:
-            msg = "A transfer is currently in progress." if is_transferring else "Cover downloads are in progress."
+        if is_transferring or is_downloading or is_cover_updating or is_cover_scanning:
+            if is_transferring:
+                msg = "A transfer is currently in progress."
+            elif is_cover_updating or is_cover_scanning:
+                msg = "A cover update is currently in progress."
+            else:
+                msg = "Cover downloads are in progress."
             reply = QMessageBox.question(
                 self, 'Confirm Exit',
                 f"{msg}\n\nDo you want to stop the operation and exit?",
@@ -1225,19 +1512,30 @@ class MainWindow(QMainWindow):
         if self._scanner_worker and self._scanner_worker.isRunning():
             self._scanner_worker.stop()
             self._scanner_worker.wait(1000)
-            self._scanner_worker.deleteLater()
+            if not self._scanner_worker.isRunning():
+                self._scanner_worker.deleteLater()
 
         # Stop cover download worker if running
         if self._cover_download_worker and self._cover_download_worker.isRunning():
             self._cover_download_worker.stop()
-            self._cover_download_worker.wait(2000)
-            self._cover_download_worker.deleteLater()
+            self._cover_download_worker.wait(6000)
+            if not self._cover_download_worker.isRunning():
+                self._cover_download_worker.deleteLater()
+
+        # Stop cover update / scan workers if running
+        for worker in (self._cover_update_worker, self._cover_scan_worker):
+            if worker and worker.isRunning():
+                worker.stop()
+                worker.wait(6000)
+                if not worker.isRunning():
+                    worker.deleteLater()
 
         # Stop transfer if running
         if self.worker and self.worker.isRunning():
             self.worker.stop()
-            self.worker.wait(2000)
-            self.worker.deleteLater()
+            self.worker.wait(6000)
+            if not self.worker.isRunning():
+                self.worker.deleteLater()
 
         # Process events to ensure threads are cleaned up before exit
         QApplication.processEvents()

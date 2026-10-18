@@ -341,6 +341,104 @@ class FileListWidget(QTableWidget):
         if all_files:
             self._add_files(all_files)
 
+    def add_device_cover_entries(self, entries):
+        """Add device-side game rows for a cover-update session.
+
+        entries: dicts with 'device_filepath' (unique list key, e.g.
+        'device:<basename>'), 'rom_name' (device ROM basename with
+        extension) and 'crc32' (int). No local file backs these rows.
+        """
+        added = []
+        for entry in entries:
+            fp = entry['device_filepath']
+            if fp in self.files_info:
+                continue
+            crc = entry['crc32']
+            file_info = {
+                'filepath': fp,
+                'filename': entry['rom_name'],
+                'original_size': 0,
+                'gbz_size': 0,
+                'original_crc': crc,
+                'original_filename': None,
+                'is_user_gbz': True,
+                'is_device_entry': True,
+                'cover_data': None,
+                'cover_filename': None,
+            }
+            self.files_info[fp] = file_info
+            self.filepaths.append(fp)
+
+            row = self.rowCount()
+            self.insertRow(row)
+
+            name_item = QTableWidgetItem(file_info['filename'])
+            name_item.setFlags(name_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
+            self.setItem(row, self.COL_NAME, name_item)
+
+            for col, text in (
+                (self.COL_ORIG_SIZE, "-"),
+                (self.COL_COMPRESSED, "-"),
+                (self.COL_RATIO, "cover"),
+            ):
+                item = QTableWidgetItem(text)
+                item.setFlags(item.flags() & ~Qt.ItemFlag.ItemIsEditable)
+                item.setTextAlignment(
+                    Qt.AlignmentFlag.AlignCenter
+                    if col != self.COL_ORIG_SIZE and col != self.COL_COMPRESSED
+                    else Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter
+                )
+                self.setItem(row, col, item)
+
+            if crc and rom_database.get_cover_filename(crc):
+                initial_art = ArtStatus.MATCH
+            elif crc:
+                initial_art = ArtStatus.NO_MATCH
+            else:
+                initial_art = ArtStatus.UNKNOWN
+            art_item = QTableWidgetItem(initial_art.value)
+            art_item.setData(Qt.ItemDataRole.UserRole, initial_art)
+            art_item.setFlags(art_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
+            art_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+            art_item.setToolTip(ART_STATUS_LEGEND)
+            self.setItem(row, self.COL_ART, art_item)
+
+            status_item = QTableWidgetItem(FileStatus.PENDING.value)
+            status_item.setData(Qt.ItemDataRole.UserRole, FileStatus.PENDING)
+            status_item.setFlags(status_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
+            status_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+            self.setItem(row, self.COL_STATUS, status_item)
+
+            progress_widget = QWidget()
+            progress_layout = QHBoxLayout(progress_widget)
+            progress_layout.setContentsMargins(5, 2, 5, 2)
+            progress_bar = QProgressBar()
+            progress_bar.setRange(0, 100)
+            progress_bar.setValue(0)
+            progress_bar.setTextVisible(True)
+            progress_bar.setMaximumHeight(20)
+            progress_bar.setFormat("%p%")
+            progress_bar.setStyleSheet("""
+                QProgressBar {
+                    border: 1px solid palette(mid);
+                    border-radius: 3px;
+                    background: palette(base);
+                    text-align: center;
+                }
+                QProgressBar::chunk {
+                    background: palette(highlight);
+                }
+            """)
+            progress_bar.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            progress_layout.addWidget(progress_bar)
+            self.setCellWidget(row, self.COL_PROGRESS, progress_widget)
+            progress_widget.progress_bar = progress_bar
+
+            added.append(fp)
+
+        if added:
+            self.files_added.emit(added)
+
     def remove_file(self, filepath):
         """Remove a file from the list."""
         if filepath not in self.files_info:
@@ -364,7 +462,7 @@ class FileListWidget(QTableWidget):
             status_item = self.item(row, self.COL_STATUS)
             if status_item:
                 status = status_item.data(Qt.ItemDataRole.UserRole)
-                if status == FileStatus.DONE:
+                if status in (FileStatus.DONE, FileStatus.UNAVAILABLE):
                     to_remove.append(filepath)
 
         for filepath in to_remove:
@@ -472,6 +570,14 @@ class FileListWidget(QTableWidget):
     def mark_transferring(self, filepath):
         """Mark a file as currently transferring."""
         self.set_file_status(filepath, FileStatus.TRANSFERRING)
+        try:
+            row = self.filepaths.index(filepath)
+            # follow the active transfer when it is outside the view
+            self.scrollTo(
+                self.model().index(row, 0), QAbstractItemView.ScrollHint.EnsureVisible
+            )
+        except ValueError:
+            pass
 
     def clear(self):
         """Clear all files."""

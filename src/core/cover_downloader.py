@@ -41,19 +41,20 @@ def get_ssl_context():
     return ssl.create_default_context()
 
 
-def download_cover(crc32: int, progress_callback: Callable[[int, int], None] | None = None, is_running_func: Callable[[], bool] | None = None) -> bytes | None:
+def download_cover(crc32: int, progress_callback: Callable[[int, int], None] | None = None, is_running_func: Callable[[], bool] | None = None, cvi: bool = False) -> bytes | None:
     """Download cover art for a ROM by CRC32.
 
     Args:
         crc32: The CRC32 of the ROM
         progress_callback: Optional callback(current_bytes, total_bytes)
         is_running_func: Optional function that returns False if download should abort
+        cvi: True for the CrankBoy 3+ cvi container, False for legacy pdi
 
     Returns:
         The cover art data as bytes, or None if download fails.
     """
     # Get cover URL from database
-    cover_url = database.get_cover_url(crc32)
+    cover_url = database.get_cover_url(crc32, cvi=cvi)
     if not cover_url:
         return None
 

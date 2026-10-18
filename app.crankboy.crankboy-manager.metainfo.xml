@@ -35,6 +35,16 @@
     </screenshot>
   </screenshots>
   <releases>
+    <release version="1.2.0" date="2026-10-18">
+      <description>
+        <ul>
+          <li>Update covers: refresh cover art for games already installed on the device (CrankBoy v3.0.0+)</li>
+          <li>Stop button is now Pause – transfers stay resumable mid-queue</li>
+          <li>Fix a crash when pausing a transfer</li>
+          <li>Action buttons now stay disabled during an active session</li>
+        </ul>
+      </description>
+    </release>
     <release version="1.1.1" date="2026-09-05">
       <description>
         <ul>
